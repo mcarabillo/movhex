@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
 #include <math.h>
@@ -11,6 +12,7 @@
 #define OFFSET_ODD -1
 #define INVALID_COORDS -99
 #define INVALID_COST -1
+#define MAX_PQ_CAPACITY 1000
 
 // Structs
 typedef struct{
@@ -33,15 +35,64 @@ typedef struct{
     AirRoute *air_routes_arr; // Array di rotte aeree
 } Cell;
 
-// Globali
-int width, height; // Dimensioni della mappa
-Cell **map = NULL; // Mappa delle celle
+// typedef struct{
+//     int x, y;
+//     int total_cost;
+// } Node;
+
+// typedef struct{
+//     Node *nodes;
+//     int size;
+//     int max_capacity;
+// } PriorityQueue;
+
+// Variabili e costanti globali
+int width, height;
+
+Cell **map = NULL;
+
 const CubeCoords neighbors_dir[MAX_NEIGHBORS] = {
     {1, -1, 0}, {1, 0, -1}, {0, 1, -1},
     {-1, 1, 0}, {-1, 0, 1}, {0, -1, 1}
 };
 
 // Funzioni
+inline bool is_cell_valid(int x, int y) {
+    return (map != NULL && x >= 0 && x < width && y >= 0 && y < height);
+}
+
+inline CubeCoords cube_add(CubeCoords a, CubeCoords b) {
+    return (CubeCoords){a.q + b.q, a.r + b.r, a.s + b.s};
+}
+
+inline CubeCoords cube_sub(CubeCoords a, CubeCoords b) {
+    return (CubeCoords){a.q - b.q, a.r - b.r, a.s - b.s};
+}
+
+inline int cube_len(CubeCoords h) {
+    assert(h.q + h.r + h.s == 0);
+    return ceil(((abs(h.q) + abs(h.r) + abs(h.s)) / 2.0));
+}
+
+inline int cube_distance(CubeCoords end, CubeCoords start) {
+    return cube_len(cube_sub(end, start));
+}
+
+inline OffsetCoords offset_from_cube(int offset, CubeCoords hex) {
+    int col = hex.q + (int)((hex.r + offset * (hex.r % 2)) / 2);
+    int row = hex.r;
+
+    return (OffsetCoords){col, row};
+}
+
+inline CubeCoords cube_from_offset(int offset, OffsetCoords hex) {
+    int q = hex.x - (int)((hex.y + offset * (hex.y % 2)) / 2);
+    int r = hex.y;
+    int s = -q - r;
+
+    return (CubeCoords){q, r, s};
+}
+
 void clean_all() {
     if(map != NULL) {
         // Free array rotte aeree
@@ -61,28 +112,47 @@ void clean_all() {
     }
 }
 
-inline bool is_cell_valid(int x, int y) {
-    if(map != NULL && x >= 0 && x < width && y >= 0 && y < height)
-        return true;
+OffsetCoords find_neighbor(int dir, CubeCoords hex) {
+    CubeCoords delta = neighbors_dir[dir];
+    CubeCoords neighbor_coords_cube = cube_add(hex, delta);
+    OffsetCoords neighbor_coords_offset = offset_from_cube(OFFSET_ODD, neighbor_coords_cube);
 
-    return false;
+    if(!is_cell_valid(neighbor_coords_offset.x, neighbor_coords_offset.y))
+        return (OffsetCoords){INVALID_COORDS, INVALID_COORDS};
+    
+    return neighbor_coords_offset;
 }
 
-inline OffsetCoords offset_from_cube(int offset, CubeCoords hex) {
-    int col = hex.q + (int)((hex.r + offset * (hex.r % 2)) / 2);
-    int row = hex.r;
+int get_neighbors_number(OffsetCoords hex, OffsetCoords *neighbors_array) {
+    int count = 0;
+    CubeCoords hex_coords_cube = cube_from_offset(OFFSET_ODD, hex);
 
-    OffsetCoords result = {col, row};
-    return result;
+    for(int i = 0; i <MAX_NEIGHBORS; i++) {
+        OffsetCoords neighbor_coords = find_neighbor(i, hex_coords_cube);
+
+        if(neighbor_coords.x == INVALID_COORDS)
+            continue;
+
+        neighbors_array[count] = neighbor_coords;
+        count++;
+    }
+
+    return count;
 }
 
-inline CubeCoords cube_from_offset(int offset, OffsetCoords hex) {
-    int q = hex.x - (int)((hex.y + offset * (hex.y % 2)) / 2);
-    int r = hex.y;
-    int s = -q - r;
-
-    CubeCoords result = {q, r, s};
-    return result;
+void update_ar_cost(int x, int y) {
+    if(!is_cell_valid(x, y))
+        return;
+    
+    Cell *cell = &map[x][y];
+    if(cell->air_routes_arr == NULL)
+        return;
+    
+    for(int i = 0; i < MAX_AIR_ROUTES; i++) {
+        AirRoute *route = &cell->air_routes_arr[i];
+        if(route->to_x != INVALID_COORDS)
+            route->air_route_cost = cell->cost;
+    }
 }
 
 void init(int cols, int rows) {
@@ -94,8 +164,8 @@ void init(int cols, int rows) {
     if(map != NULL)
         clean_all();
 
-    width = (size_t)cols;   // numero di colonne
-    height = (size_t)rows;  // numero di righe
+    width = cols;   // numero di colonne
+    height = rows;  // numero di righe
     
     map = (Cell **)malloc(width * sizeof(Cell *));
     if(map == NULL) {
@@ -130,52 +200,6 @@ void init(int cols, int rows) {
     printf("OK\n");
 }
 
-CubeCoords cube_add(CubeCoords a, CubeCoords b) {
-    return (CubeCoords){a.q + b.q, a.r + b.r, a.s + b.s};
-}
-
-CubeCoords cube_sub(CubeCoords a, CubeCoords b) {
-    return (CubeCoords){a.q - b.q, a.r - b.r, a.s - b.s};
-}
-
-int cube_len(CubeCoords h) {
-    assert(h.q + h.r + h.s == 0);
-    return ceil(((abs(h.q) + abs(h.r) + abs(h.s)) / 2.0));
-}
-
-int cube_distance(CubeCoords end, CubeCoords start) {
-    CubeCoords diff = cube_sub(end, start);
-    return cube_len(diff);
-}
-
-OffsetCoords find_neighbor(int dir, CubeCoords hex) {
-    CubeCoords delta = neighbors_dir[dir];
-    CubeCoords neighbor_coords_cube = cube_add(hex, delta);
-    OffsetCoords neighbor_coords_offset = offset_from_cube(OFFSET_ODD, neighbor_coords_cube);
-
-    if(!is_cell_valid(neighbor_coords_offset.x, neighbor_coords_offset.y))
-        return (OffsetCoords){INVALID_COORDS, INVALID_COORDS};
-    
-    return neighbor_coords_offset;
-}
-
-int get_neighbors_number(OffsetCoords hex, OffsetCoords *neighbors_array) {
-    int count = 0;
-    CubeCoords hex_coords_cube = cube_from_offset(OFFSET_ODD, hex);
-
-    for(int i = 0; i <MAX_NEIGHBORS; i++) {
-        OffsetCoords neighbor_coords = find_neighbor(i, hex_coords_cube);
-
-        if(neighbor_coords.x == INVALID_COORDS)
-            continue;
-
-        neighbors_array[count] = neighbor_coords;
-        count++;
-    }
-
-    return count;
-}
-
 void change_cost(int x, int y, int v, int radius) {
     if(!is_cell_valid(x, y) || abs(v) > 10 || radius <= 0) {
         printf("KO\n");
@@ -204,42 +228,23 @@ void change_cost(int x, int y, int v, int radius) {
                 cell->cost = 0;
             if(cell->cost > 100)
                 cell->cost = 100;
+
+            update_ar_cost(current_offset.x, current_offset.y);
         }
     }
 
     printf("OK\n");
 }
 
-int calculate_ar_cost(AirRoute *arr, int ground_cost) {
-    if(arr == NULL){
-        printf("Invalid air route array\n");
-        exit(EXIT_FAILURE);
-    }
-
-    int cost_sum = 0;
-    int routes_no = 0;
-
-    for(int i = 0; i < MAX_AIR_ROUTES; i++){
-        AirRoute *route = &arr[i];
-        if(route->to_x == INVALID_COORDS)
-            continue;
-        cost_sum += route->air_route_cost;
-        routes_no++;
-    }
-    
-    int cost_avg = (int)floor((double)(cost_sum + ground_cost) / (double)(routes_no + 1));
-    return cost_avg;
-}
-
 void toggle_air_routes(int x1, int y1, int x2, int y2) {
     if(!is_cell_valid(x1, y1) || !is_cell_valid(x2, y2) || (x1 == x2 && y1 == y2)) {
-        printf("Cell not valid\n");
+        printf("KO\n");
         return;
     }
 
     Cell *start = &map[x1][y1];
     if(start->air_routes_number == MAX_AIR_ROUTES) {
-        printf("Max air routes reached\n");
+        printf("KO\n");
         return;
     }
 
@@ -250,7 +255,7 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         for(int i = 0; i < MAX_AIR_ROUTES; i++){
             start->air_routes_arr[i].to_x = INVALID_COORDS;
             start->air_routes_arr[i].to_y = INVALID_COORDS;
-            start->air_routes_arr[i].air_route_cost = 0;
+            start->air_routes_arr[i].air_route_cost = 0; // Costo 0 = rotta non attiva
         }
     }
 
@@ -284,7 +289,7 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         AirRoute *route = &start->air_routes_arr[first_empty_idx];
         route->to_x = x2;
         route->to_y = y2;
-        route->air_route_cost = calculate_ar_cost(start->air_routes_arr, start->cost);
+        route->air_route_cost = start->cost;
         start->air_routes_number++;
 
         printf("OK\n");
@@ -294,13 +299,18 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
 }
 
 int travel_cost(int xp, int yp, int xd, int yd) {
-    if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd))
+    if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd)){
+        printf("-1\n");
         return INVALID_COST;
+    }
 
-    if(xp == xd && yp == yd)
+    if(xp == xd && yp == yd){
+        printf("0\n");
         return 0;
+    }
 
-    return 0;
+    // Implementazione dell'algoritmo A*
+    return 0; // Placeholder
 }
 
 // Funzione MAIN
