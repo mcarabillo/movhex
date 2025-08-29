@@ -12,7 +12,6 @@
 #define OFFSET_ODD -1
 #define INVALID_COORDS -99
 #define INVALID_COST -1
-#define MAX_PQ_CAPACITY 1000
 
 // Structs
 typedef struct{
@@ -35,16 +34,17 @@ typedef struct{
     AirRoute *air_routes_arr; // Array di rotte aeree
 } Cell;
 
-// typedef struct{
-//     int x, y;
-//     int total_cost;
-// } Node;
+typedef struct{
+    int x, y;
+    int distance;
+} Node;
 
-// typedef struct{
-//     Node *nodes;
-//     int size;
-//     int max_capacity;
-// } PriorityQueue;
+typedef struct{
+    Node *heap;
+    int size;
+    int max_capacity;
+    int **positions;
+} MinHeap;
 
 // Variabili e costanti globali
 int width, height;
@@ -155,6 +155,42 @@ void update_ar_cost(int x, int y) {
     }
 }
 
+MinHeap *minheap_init(int max_capacity) {
+    MinHeap *min_heap = (MinHeap *)malloc(sizeof(MinHeap));
+    if (min_heap == NULL) {
+        printf("Memory allocation error in minheap_init\n");
+        exit(EXIT_FAILURE);
+    }
+
+    min_heap->heap = (Node *)malloc(max_capacity * sizeof(Node));
+    if (!min_heap->heap) {
+        printf("Memory allocation error in minheap_init\n");
+        exit(EXIT_FAILURE);
+    }
+
+    min_heap->size = 0;
+    min_heap->max_capacity = max_capacity;
+    min_heap->positions = (int **)malloc(width * sizeof(int *));
+    if (!min_heap->positions) {
+        printf("Memory allocation error in minheap_init\n");
+        exit(EXIT_FAILURE);
+    }
+
+    min_heap->positions[0] = (int *)malloc(width * height * sizeof(int));
+    if(min_heap->positions[0] == NULL) {
+        printf("Memory allocation error in minheap_init\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for(int x = 0; x < width; x++){
+        for(int y = 0; y < height; y++){
+            min_heap->positions[x][y] = -1; // Inizializzo tutte le posizioni a -1 (non presenti nell'heap)
+        }
+    }
+
+    return min_heap;
+}
+
 void init(int cols, int rows) {
     if(rows <= 0 || cols <= 0) {
         printf("KO\n");
@@ -177,8 +213,6 @@ void init(int cols, int rows) {
     map[0] = (Cell *)malloc(width * height * sizeof(Cell));
     if(map[0] == NULL) {
         printf("map allocation error in init\n");
-        free(map);
-        map = NULL;
         exit(EXIT_FAILURE);
     }
 
@@ -188,8 +222,8 @@ void init(int cols, int rows) {
     }
 
     // Inizializza tutte le celle
-    for(int x = 0; x < width; x++){      // x = colonna
-        for(int y = 0; y < height; y++){  // y = riga
+    for(int x = 0; x < width; x++){ // x = colonna
+        for(int y = 0; y < height; y++){ // y = riga
             Cell *cell = &map[x][y];
             cell->air_routes_arr = NULL;
             cell->air_routes_number = 0;
@@ -296,21 +330,6 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         return;
     }
     else printf("KO\n");
-}
-
-int travel_cost(int xp, int yp, int xd, int yd) {
-    if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd)){
-        printf("-1\n");
-        return INVALID_COST;
-    }
-
-    if(xp == xd && yp == yd){
-        printf("0\n");
-        return 0;
-    }
-
-    // Implementazione dell'algoritmo A*
-    return 0; // Placeholder
 }
 
 // Funzione MAIN
