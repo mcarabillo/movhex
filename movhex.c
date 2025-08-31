@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <math.h>
 #include <assert.h>
-#include <time.h>
 
 #define MAX_AIR_ROUTES 5
 #define MAX_NEIGHBORS 6
@@ -34,24 +33,16 @@ typedef struct{
     AirRoute *air_routes_arr; // Array di rotte aeree
 } Cell;
 
-typedef enum{
-    NOT_SEEN,
-    EXPLORED,
-    IN_PROGRESS
-} NodeState;
-
 typedef struct{
-    int x, y;
-    int total_cost;
-    NodeState state;
+    OffsetCoords coords;
+    int cost;
 } Node;
 
 typedef struct{
-    Node **heap;
-    int *internal_costs;
+    Node *nodes;
     int size;
     int max_capacity;
-} MinHeap;
+} PriorityQueue;
 
 // Variabili e costanti globali
 int width, height;
@@ -100,14 +91,57 @@ inline CubeCoords cube_from_offset(int offset, OffsetCoords hex) {
     return (CubeCoords){q, r, s};
 }
 
+inline int get_index(int x, int y) {
+    return y * width + x;
+}
+
+inline bool pq_is_empty(PriorityQueue *pq) {
+    return pq->size == 0;
+}
+
+PriorityQueue *pq_init(int max_capacity) {
+    PriorityQueue *pq = (PriorityQueue *)malloc(sizeof(PriorityQueue));
+    pq->nodes = (Node *)malloc(max_capacity * sizeof(Node));
+    pq->size = 0;
+    pq->max_capacity = max_capacity;
+    return pq;
+}
+
+void pq_enqueue(PriorityQueue *pq, Node node) {
+    if(pq->size < pq->max_capacity) {
+        pq->nodes[pq->size] = node;
+        pq->size++;
+    }
+}
+
+Node *pq_dequeue(PriorityQueue *pq) {
+    if(pq->size == 0) return NULL;
+
+    // Trova il nodo con la priorità più alta (costo più basso)
+    int min_index = 0;
+    for(int i = 1; i < pq->size; i++) {
+        if(pq->nodes[i].cost < pq->nodes[min_index].cost) {
+            min_index = i;
+        }
+    }
+
+    // Estrai il nodo con la priorità più alta
+    Node *result = &pq->nodes[min_index];
+
+    // Sposta l'ultimo nodo nella posizione del nodo estratto
+    pq->nodes[min_index] = pq->nodes[pq->size - 1];
+    pq->size--;
+
+    return result;
+}
+
 OffsetCoords find_neighbor(int dir, CubeCoords hex) {
     CubeCoords delta = neighbors_dir[dir];
     CubeCoords neighbor_coords_cube = cube_add(hex, delta);
     OffsetCoords neighbor_coords_offset = offset_from_cube(OFFSET_ODD, neighbor_coords_cube);
 
-    if(!is_cell_valid(neighbor_coords_offset.x, neighbor_coords_offset.y))
-        return (OffsetCoords){INVALID_COORDS, INVALID_COORDS};
-    
+    if(!is_cell_valid(neighbor_coords_offset.x, neighbor_coords_offset.y)) return (OffsetCoords){INVALID_COORDS, INVALID_COORDS};
+
     return neighbor_coords_offset;
 }
 
@@ -118,213 +152,13 @@ int get_neighbors_number(OffsetCoords hex, OffsetCoords *neighbors_array) {
     for(int i = 0; i < MAX_NEIGHBORS; i++) {
         OffsetCoords neighbor_coords = find_neighbor(i, hex_coords_cube);
 
-        if(neighbor_coords.x == INVALID_COORDS)
-            continue;
+        if(neighbor_coords.x == INVALID_COORDS) continue;
 
         neighbors_array[count] = neighbor_coords;
         count++;
     }
 
     return count;
-}
-
-MinHeap *pq_init(int max_capacity) {
-    MinHeap *h = (MinHeap *)malloc(sizeof(MinHeap));
-    if(h == NULL) {
-        printf("Memory allocation error in pq_init\n");
-        exit(EXIT_FAILURE);
-    }
-
-    h->heap = (Node **)malloc(max_capacity * sizeof(Node *));
-    h->internal_costs = (int *)malloc(max_capacity * sizeof(int));
-    h->size = 0;
-    h->max_capacity = max_capacity;
-
-    return h;
-}
-
-void pq_free(MinHeap *h) {
-    if(h != NULL) {
-        free(h->heap);
-        free(h->internal_costs);
-        free(h);
-    }
-}
-
-void swap_elements(MinHeap *h, int a, int b) {
-    Node *temp_node = h->heap[a];
-    int temp_cost = h->internal_costs[a];
-    h->heap[a] = h->heap[b];
-    h->internal_costs[a] = h->internal_costs[b];
-    h->heap[b] = temp_node;
-    h->internal_costs[b] = temp_cost;
-}
-
-void heapify_up(MinHeap *h, int idx) { // Heapify dopo push
-    if(idx == 0) 
-        return;
-
-    int parent_idx = (idx - 1) / 2;
-    if(h->internal_costs[parent_idx] <= h->internal_costs[idx])
-        return;
-
-    swap_elements(h, idx, parent_idx);
-    heapify_up(h, parent_idx);
-}
-
-void heapify_down(MinHeap *h, int idx) { // Heapify dopo pop
-    int left = 2 * idx + 1;
-    int right = 2 * idx + 2;
-    int smallest = idx;
-
-    if(left < h->size && h->internal_costs[left] < h->internal_costs[smallest])
-        smallest = left;
-
-    if(right < h->size && h->internal_costs[right] < h->internal_costs[smallest])
-        smallest = right;
-
-    if(smallest != idx) {
-        swap_elements(h, idx, smallest);
-        heapify_down(h, smallest);
-    }
-}
-
-void pq_push(MinHeap *h, Node *node, int internal_cost) {
-    if(h->size >= h->max_capacity) {
-        printf("Heap is full\n");
-        return;
-    }
-
-    h->heap[h->size] = node;
-    h->internal_costs[h->size] = internal_cost;
-    heapify_up(h, h->size);
-    h->size++;
-}
-
-Node *pq_pop(MinHeap *h) {
-    if(h->size == 0)
-        return NULL;
-
-    Node *min_node = h->heap[0];
-
-    h->heap[0] = h->heap[h->size - 1];
-    h->internal_costs[0] = h->internal_costs[h->size - 1];
-    h->size--;
-
-    heapify_down(h, 0);
-
-    return min_node;
-}
-
-int astar(OffsetCoords start, OffsetCoords end) {
-    if(!is_cell_valid(start.x, start.y) || !is_cell_valid(end.x, end.y))
-        return INVALID_COST;
-
-    if(start.x == end.x && start.y == end.y)
-        return 0;
-
-    // Allocazione memoria nodi
-    Node **nodes = (Node **)malloc(width * sizeof(Node *));
-    for(int x = 0; x < width; x++) {
-        nodes[x] = (Node *)malloc(height * sizeof(Node));
-        for(int y = 0; y < height; y++) {
-            nodes[x][y].x = x;
-            nodes[x][y].y = y;
-            nodes[x][y].total_cost = INT32_MAX; // Costo "infinito"
-            nodes[x][y].state = NOT_SEEN;
-        }
-    }
-
-    // Inizializzazione priority queue (min-heap)
-    MinHeap *frontier = pq_init(width * height);
-
-    // Inizializzazione nodo sorgente
-    Node *start_node  = &nodes[start.x][start.y];
-    start_node->total_cost = 0;
-    start_node->state = IN_PROGRESS;
-    int start_internal_cost = cube_distance(cube_from_offset(OFFSET_ODD, start), cube_from_offset(OFFSET_ODD, end));
-
-    pq_push(frontier, start_node, start_internal_cost);
-
-    int result = INVALID_COST;
-
-    while(frontier->size != 0) {
-        Node *current = pq_pop(frontier);
-        current->state = EXPLORED;
-
-        // Destinazione raggiunta
-        if(current == &nodes[end.x][end.y]){
-            result = current->total_cost;
-            break; // Costo totale del percorso trovato
-        }
-
-        // Esplorazione via terra
-        OffsetCoords neighbors[MAX_NEIGHBORS];
-        int neighbor_count = get_neighbors_number((OffsetCoords){current->x, current->y}, neighbors);
-
-        for(int i = 0; i < neighbor_count; i++){
-            int neighbor_x = neighbors[i].x;
-            int neighbor_y = neighbors[i].y;
-
-            if(!is_cell_valid(neighbor_x, neighbor_y) || map[neighbor_x][neighbor_y].cost == 0 || nodes[neighbor_x][neighbor_y].state == EXPLORED)
-                continue;
-
-            int movement_cost = map[current->x][current->y].cost;
-            if(neighbor_x != end.x && neighbor_y != end.y) // Se il vicino non è la destinazione
-                movement_cost += map[neighbor_x][neighbor_y].cost;
-
-            int new_cost = current->total_cost + movement_cost;
-            if(new_cost < nodes[neighbor_x][neighbor_y].total_cost) {
-                nodes[neighbor_x][neighbor_y].total_cost = new_cost;
-
-                if(nodes[neighbor_x][neighbor_y].state == NOT_SEEN) {
-                    nodes[neighbor_x][neighbor_y].state = IN_PROGRESS;
-                    int internal_cost = new_cost + cube_distance(cube_from_offset(OFFSET_ODD, (OffsetCoords){neighbor_x, neighbor_y}), cube_from_offset(OFFSET_ODD, end));
-                    pq_push(frontier, &nodes[neighbor_x][neighbor_y], internal_cost);
-                }
-            }
-        }
-
-        // Esplorazione rotte aeree
-        Cell *source = &map[current->x][current->y];
-        if(source->air_routes_arr != NULL) {
-            for(int i = 0; i < source->air_routes_number; i++) {
-                AirRoute *route = &source->air_routes_arr[i];
-                if(route->to_x == INVALID_COORDS)
-                    continue;
-
-                int neighbor_x = route->to_x;
-                int neighbor_y = route->to_y;
-
-                if(!is_cell_valid(neighbor_x, neighbor_y) || nodes[neighbor_x][neighbor_y].state == EXPLORED)
-                    continue;
-
-                int aerial_cost = route->air_route_cost;
-                if(neighbor_x != end.x && neighbor_y != end.y) // Se il vicino non è la destinazione
-                    aerial_cost += map[neighbor_x][neighbor_y].cost;
-                
-                int new_cost = current->total_cost + aerial_cost;
-                if(new_cost < nodes[neighbor_x][neighbor_y].total_cost) {
-                    nodes[neighbor_x][neighbor_y].total_cost = new_cost;
-
-                    if(nodes[neighbor_x][neighbor_y].state == NOT_SEEN) {
-                        nodes[neighbor_x][neighbor_y].state = IN_PROGRESS;
-                        int internal_cost = new_cost + cube_distance(cube_from_offset(OFFSET_ODD, (OffsetCoords){neighbor_x, neighbor_y}), cube_from_offset(OFFSET_ODD, end));
-                        pq_push(frontier, &nodes[neighbor_x][neighbor_y], internal_cost);
-                    }
-                }
-            }
-        }
-
-    }
-
-    for(int x = 0; x < width; x++) {
-        free(nodes[x]);
-    }
-    free(nodes);
-    pq_free(frontier);
-
-    return result; // Percorso non trovato
 }
 
 void clean_all() {
@@ -347,18 +181,59 @@ void clean_all() {
 }
 
 void update_ar_cost(int x, int y) {
-    if(!is_cell_valid(x, y))
-        return;
+    if(!is_cell_valid(x, y)) return;
     
     Cell *cell = &map[x][y];
-    if(cell->air_routes_arr == NULL)
-        return;
+    if(cell->air_routes_arr == NULL) return;
     
     for(int i = 0; i < MAX_AIR_ROUTES; i++) {
         AirRoute *route = &cell->air_routes_arr[i];
-        if(route->to_x != INVALID_COORDS)
+        if(route->to_x != INVALID_COORDS){
             route->air_route_cost = cell->cost;
+        }
     }
+}
+
+int dijkstra(OffsetCoords start, OffsetCoords end) {
+    if(start.x == end.x && start.y == end.y) return 0;
+    if(!is_cell_valid(start.x, start.y) || !is_cell_valid(end.x, end.y)) return INVALID_COST;
+
+    PriorityQueue *frontier = pq_init(width * height);
+    if(frontier == NULL) {
+        printf("Priority Queue allocation error in dijkstra\n");
+        exit(EXIT_FAILURE);
+    }
+
+    pq_enqueue(frontier, (Node){start, 0});
+
+    int *cost_so_far = (int *)malloc(width * height * sizeof(int));
+
+    int idx = get_index(start.x, start.y);
+    cost_so_far[idx] = 0;
+    int result = INVALID_COST;
+    bool found = false;
+
+    while(!pq_is_empty(frontier) && found == false) {
+        Node current = *pq_dequeue(frontier);
+        Cell *current_ptr = &map[current.coords.x][current.coords.y];
+
+        if(current.coords.x == end.x && current.coords.y == end.y) break; // Controllo se ho raggiunto la destinazione
+        else if(current_ptr->air_routes_number > 0){ // Controllo se ci sono rotte aeree
+            for(int i = 0; i < current_ptr->air_routes_number; i++){
+                AirRoute *current_route = &current_ptr->air_routes_arr[i];
+                if(current_route->to_x == end.x && current_route->to_y == end.y){
+                    result = cost_so_far[get_index(current.coords.x, current.coords.y)] + current_route->air_route_cost;
+                    found = true;
+                    break;
+                }
+            }
+        }
+        else{ // Inizio a guardare i vicini
+            
+        }  
+    }
+
+    return result;
 }
 
 // Funzioni principali
