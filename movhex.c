@@ -397,10 +397,6 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
     }
 
     Cell *start = &map[x1][y1];
-    if(start->air_routes_number == MAX_AIR_ROUTES) {
-        printf("KO\n");
-        return;
-    }
 
     // Inizializzazione array rotte
     if(start->air_routes_arr == NULL){
