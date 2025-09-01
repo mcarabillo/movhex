@@ -107,32 +107,65 @@ PriorityQueue *pq_init(int max_capacity) {
     return pq;
 }
 
+void heapify_up(PriorityQueue *pq, int idx) {
+    while(idx > 0){
+        int parent = (idx - 1) / 2;
+        if(pq->nodes[idx].cost >= pq->nodes[parent].cost) break;
+
+        Node temp = pq->nodes[idx];
+        pq->nodes[idx] = pq->nodes[parent];
+        pq->nodes[parent] = temp;
+
+        idx = parent;
+    }
+}
+
+void heapify_down(PriorityQueue *pq, int idx) {
+    int left, right, smallest;
+    while(true){
+        left = 2 * idx + 1;
+        right = 2 * idx + 2;
+        smallest = idx;
+
+        if(left < pq->size && pq->nodes[left].cost < pq->nodes[smallest].cost)
+            smallest = left;
+        if(right < pq->size && pq->nodes[right].cost < pq->nodes[smallest].cost)
+            smallest = right;
+        if(smallest == idx) break;
+
+        Node temp = pq->nodes[idx];
+        pq->nodes[idx] = pq->nodes[smallest];
+        pq->nodes[smallest] = temp;
+
+        idx = smallest;
+    }
+}
+
 void pq_enqueue(PriorityQueue *pq, Node node) {
     if(pq->size < pq->max_capacity) {
         pq->nodes[pq->size] = node;
         pq->size++;
+        heapify_up(pq, pq->size - 1);
     }
 }
 
 Node *pq_dequeue(PriorityQueue *pq) {
     if(pq->size == 0) return NULL;
 
-    // Trova il nodo con la priorità più alta (costo più basso)
-    int min_index = 0;
-    for(int i = 1; i < pq->size; i++) {
-        if(pq->nodes[i].cost < pq->nodes[min_index].cost) {
-            min_index = i;
-        }
-    }
+    Node *minimum = &pq->nodes[0];
 
-    // Estrai il nodo con la priorità più alta
-    Node *result = &pq->nodes[min_index];
-
-    // Sposta l'ultimo nodo nella posizione del nodo estratto
-    pq->nodes[min_index] = pq->nodes[pq->size - 1];
+    pq->nodes[0] = pq->nodes[pq->size - 1];
     pq->size--;
+    heapify_down(pq, 0);
 
-    return result;
+    return minimum;
+}
+
+void pq_free(PriorityQueue *pq) {
+    if(pq != NULL) {
+        free(pq->nodes);
+        free(pq);
+    }
 }
 
 OffsetCoords find_neighbor(int dir, CubeCoords hex) {
@@ -189,7 +222,8 @@ void update_ar_cost(int x, int y) {
     for(int i = 0; i < MAX_AIR_ROUTES; i++) {
         AirRoute *route = &cell->air_routes_arr[i];
         if(route->to_x != INVALID_COORDS){
-            route->air_route_cost = cell->cost;
+            int new_cost = cell->cost;
+            route->air_route_cost = new_cost;
         }
     }
 }
@@ -198,40 +232,80 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
     if(start.x == end.x && start.y == end.y) return 0;
     if(!is_cell_valid(start.x, start.y) || !is_cell_valid(end.x, end.y)) return INVALID_COST;
 
+    int idx = get_index(start.x, start.y);
+    int result = INVALID_COST;
+
     PriorityQueue *frontier = pq_init(width * height);
     if(frontier == NULL) {
         printf("Priority Queue allocation error in dijkstra\n");
         exit(EXIT_FAILURE);
     }
 
+    int *cost_so_far = (int *)malloc(width * height * sizeof(int));
+    if(cost_so_far == NULL) {
+        printf("cost_so_far allocation error in dijkstra\n");
+        exit(EXIT_FAILURE);
+    }
+
+    cost_so_far[idx] = 0;
+    for(int i = 0; i < width * height; i++) {
+        if(i != idx){
+            cost_so_far[i] = INT32_MAX;
+        }
+    }
     pq_enqueue(frontier, (Node){start, 0});
 
-    int *cost_so_far = (int *)malloc(width * height * sizeof(int));
+    while(!pq_is_empty(frontier)) {
+        Node current_node = *pq_dequeue(frontier);
 
-    int idx = get_index(start.x, start.y);
-    cost_so_far[idx] = 0;
-    int result = INVALID_COST;
-    bool found = false;
+        if(current_node.cost > cost_so_far[get_index(current_node.coords.x, current_node.coords.y)]) continue;
+        if(current_node.coords.x == end.x && current_node.coords.y == end.y){
+            result = cost_so_far[get_index(end.x, end.y)];
 
-    while(!pq_is_empty(frontier) && found == false) {
-        Node current = *pq_dequeue(frontier);
-        Cell *current_ptr = &map[current.coords.x][current.coords.y];
+            free(cost_so_far);
+            pq_free(frontier);
 
-        if(current.coords.x == end.x && current.coords.y == end.y) break; // Controllo se ho raggiunto la destinazione
-        else if(current_ptr->air_routes_number > 0){ // Controllo se ci sono rotte aeree
-            for(int i = 0; i < current_ptr->air_routes_number; i++){
-                AirRoute *current_route = &current_ptr->air_routes_arr[i];
-                if(current_route->to_x == end.x && current_route->to_y == end.y){
-                    result = cost_so_far[get_index(current.coords.x, current.coords.y)] + current_route->air_route_cost;
-                    found = true;
-                    break;
+            return result;
+        }
+
+        Cell *current_cell = &map[current_node.coords.x][current_node.coords.y];
+
+        // Esploro le rotte aeree
+        if(current_cell->air_routes_arr != NULL){ // Controllo se ci sono rotte aeree
+            for(int i = 0; i < MAX_AIR_ROUTES; i++){
+                AirRoute *current_ar = &current_cell->air_routes_arr[i];
+
+                if(current_ar->to_x != INVALID_COORDS && is_cell_valid(current_ar->to_x, current_ar->to_y)){
+                    OffsetCoords destination = (OffsetCoords){current_ar->to_x, current_ar->to_y};
+                    int new_cost = cost_so_far[get_index(current_node.coords.x, current_node.coords.y)] + current_ar->air_route_cost;
+
+                    if(new_cost < cost_so_far[get_index(destination.x, destination.y)]){
+                        cost_so_far[get_index(destination.x, destination.y)] = new_cost;
+                        pq_enqueue(frontier, (Node){destination, new_cost});
+                    }
                 }
             }
         }
-        else{ // Inizio a guardare i vicini
-            
-        }  
+
+        // Esploro i vicini
+        OffsetCoords neighbors_array[MAX_NEIGHBORS];
+        int neighbors_number = get_neighbors_number(current_node.coords, neighbors_array);
+
+        for(int i = 0; i < neighbors_number; i++){
+            OffsetCoords neighbor = neighbors_array[i];
+            Cell *neighbor_cell = &map[neighbor.x][neighbor.y];
+            int new_cost = cost_so_far[get_index(current_node.coords.x, current_node.coords.y)] + neighbor_cell->cost;
+
+            if(new_cost < cost_so_far[get_index(neighbor.x, neighbor.y)]){
+                cost_so_far[get_index(neighbor.x, neighbor.y)] = new_cost;
+                pq_enqueue(frontier, (Node){neighbor, new_cost});
+            }
+        }
+
     }
+
+    free(cost_so_far);
+    pq_free(frontier);
 
     return result;
 }
@@ -291,17 +365,17 @@ void change_cost(int x, int y, int v, int radius) {
     for(int q = center_cube.q - radius; q <= center_cube.q + radius; q++) {
         for(int r = center_cube.r - radius; r <= center_cube.r + radius; r++) {
             int s = -q - r;
-            CubeCoords current_cube = {q, r, s};
-            OffsetCoords current_offset = offset_from_cube(OFFSET_ODD, current_cube); // Converto in offset per controllarne la validità
-            if(!is_cell_valid(current_offset.x, current_offset.y))
+            CubeCoords current_node_cube = {q, r, s};
+            OffsetCoords current_node_offset = offset_from_cube(OFFSET_ODD, current_node_cube); // Converto in offset per controllarne la validità
+            if(!is_cell_valid(current_node_offset.x, current_node_offset.y))
                 continue;
             
-            int distance = cube_distance(current_cube, center_cube);
+            int distance = cube_distance(current_node_cube, center_cube);
             if(distance > radius)
                 continue;
 
-            Cell *cell = &map[current_offset.x][current_offset.y];
-            double cost_coefficient = ((double)radius - (double)cube_distance(current_cube, center_cube)) / (double)radius;
+            Cell *cell = &map[current_node_offset.x][current_node_offset.y];
+            double cost_coefficient = ((double)radius - (double)cube_distance(current_node_cube, center_cube)) / (double)radius;
             cell->cost += (int)floor(v * fmax(0.0, cost_coefficient));
 
             if(cell->cost < 0)
@@ -309,7 +383,7 @@ void change_cost(int x, int y, int v, int radius) {
             if(cell->cost > 100)
                 cell->cost = 100;
 
-            update_ar_cost(current_offset.x, current_offset.y);
+            update_ar_cost(current_node_offset.x, current_node_offset.y);
         }
     }
 
@@ -366,10 +440,12 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         
     }
     else if(first_empty_idx != -1){ // Aggiunta rotta
+        // int new_cost = calculate_ar_cost(start);
         AirRoute *route = &start->air_routes_arr[first_empty_idx];
+        Cell *cell = &map[x1][y1];
         route->to_x = x2;
         route->to_y = y2;
-        route->air_route_cost = start->cost;
+        route->air_route_cost = cell->cost;
         start->air_routes_number++;
 
         printf("OK\n");
@@ -379,13 +455,12 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
 }
 
 int travel_cost(int xp, int yp, int xd, int yd) {
-    if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd))
-        return INVALID_COST;
+    if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd)) return INVALID_COST;
 
-    if(xp == xd && yp == yd)
-        return 0;
+    if(xp == xd && yp == yd) return 0;
 
-    return astar((OffsetCoords){xp, yp}, (OffsetCoords){xd, yd});
+    int cost = dijkstra((OffsetCoords){xp, yp}, (OffsetCoords){xd, yd});
+    return cost;
 }
 
 // Funzione MAIN
