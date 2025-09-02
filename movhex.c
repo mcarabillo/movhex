@@ -35,7 +35,7 @@ typedef struct{
 
 typedef struct{
     OffsetCoords coords;
-    int cost;
+    int cost; // Distanza
 } Node;
 
 typedef struct{
@@ -89,10 +89,6 @@ inline CubeCoords cube_from_offset(int offset, OffsetCoords hex) {
     int s = -q - r;
 
     return (CubeCoords){q, r, s};
-}
-
-inline int get_index(int x, int y) {
-    return y * width + x;
 }
 
 inline bool pq_is_empty(PriorityQueue *pq) {
@@ -149,15 +145,13 @@ void pq_enqueue(PriorityQueue *pq, Node node) {
     }
 }
 
-Node *pq_dequeue(PriorityQueue *pq) {
-    if(pq->size == 0) return NULL;
-
-    Node *minimum = &pq->nodes[0];
-
+Node pq_dequeue(PriorityQueue *pq) {
+    assert(pq->size > 0);
+    
+    Node minimum = pq->nodes[0];
     pq->nodes[0] = pq->nodes[pq->size - 1];
     pq->size--;
     heapify_down(pq, 0);
-
     return minimum;
 }
 
@@ -168,30 +162,46 @@ void pq_free(PriorityQueue *pq) {
     }
 }
 
-OffsetCoords find_neighbor(int dir, CubeCoords hex) {
+OffsetCoords find_ground_neighbor(int dir, CubeCoords hex) {
     CubeCoords delta = neighbors_dir[dir];
-    CubeCoords neighbor_coords_cube = cube_add(hex, delta);
-    OffsetCoords neighbor_coords_offset = offset_from_cube(OFFSET_ODD, neighbor_coords_cube);
+    CubeCoords ground_neighbor_coords_cube = cube_add(hex, delta);
+    OffsetCoords ground_neighbor_coords_offset = offset_from_cube(OFFSET_ODD, ground_neighbor_coords_cube);
 
-    if(!is_cell_valid(neighbor_coords_offset.x, neighbor_coords_offset.y)) return (OffsetCoords){INVALID_COORDS, INVALID_COORDS};
+    if(!is_cell_valid(ground_neighbor_coords_offset.x, ground_neighbor_coords_offset.y)) return (OffsetCoords){INVALID_COORDS, INVALID_COORDS};
 
-    return neighbor_coords_offset;
+    return ground_neighbor_coords_offset;
 }
 
-int get_neighbors_number(OffsetCoords hex, OffsetCoords *neighbors_array) {
+int get_all_neighbors(OffsetCoords hex, OffsetCoords *neighbors_array, int *costs_array) { // Considero come vicini anche gli esagoni raggiungibili tramite rotta aerea
     int count = 0;
     CubeCoords hex_coords_cube = cube_from_offset(OFFSET_ODD, hex);
 
+    // Vicini terrestri
     for(int i = 0; i < MAX_NEIGHBORS; i++) {
-        OffsetCoords neighbor_coords = find_neighbor(i, hex_coords_cube);
+        OffsetCoords ground_neighbor_coords = find_ground_neighbor(i, hex_coords_cube);
 
-        if(neighbor_coords.x == INVALID_COORDS) continue;
+        if(ground_neighbor_coords.x == INVALID_COORDS) continue;
 
-        neighbors_array[count] = neighbor_coords;
+        neighbors_array[count] = ground_neighbor_coords;
+        costs_array[count] = map[ground_neighbor_coords.x][ground_neighbor_coords.y].cost; // DA RIVEDERE
         count++;
     }
 
-    return count;
+    // Vicini aerei
+    Cell *current_cell = &map[hex.x][hex.y];
+
+    if(current_cell->air_routes_arr == NULL) return count;
+
+    for(int i = 0; i < MAX_AIR_ROUTES; i++){
+        AirRoute *route = &current_cell->air_routes_arr[i];
+        if(route->to_x != INVALID_COORDS){
+            neighbors_array[count] = (OffsetCoords){route->to_x, route->to_y};
+            costs_array[count] = route->air_route_cost;
+            count++;
+        }
+    }
+
+    return count; // Ritorno il numero di vicini, non l'array
 }
 
 void clean_all() {
@@ -229,82 +239,75 @@ void update_ar_cost(int x, int y) {
 }
 
 int dijkstra(OffsetCoords start, OffsetCoords end) {
-    if(start.x == end.x && start.y == end.y) return 0;
+    // Controllo subito se le celle sono valide, se posso uscire dalla posizione iniziale oppure se le celle coincidono
     if(!is_cell_valid(start.x, start.y) || !is_cell_valid(end.x, end.y)) return INVALID_COST;
-
-    int idx = get_index(start.x, start.y);
-    int result = INVALID_COST;
+    if(map[start.x][start.y].cost == 0) return INVALID_COST;
+    if(start.x == end.x && start.y == end.y) return 0;
 
     PriorityQueue *frontier = pq_init(width * height);
-    if(frontier == NULL) {
-        printf("Priority Queue allocation error in dijkstra\n");
-        exit(EXIT_FAILURE);
-    }
 
-    int *cost_so_far = (int *)malloc(width * height * sizeof(int));
-    if(cost_so_far == NULL) {
-        printf("cost_so_far allocation error in dijkstra\n");
-        exit(EXIT_FAILURE);
-    }
+    bool **visited = (bool **)malloc(width * sizeof(bool *));
+    int **distances = (int **)malloc(width * sizeof(int *));
 
-    cost_so_far[idx] = 0;
-    for(int i = 0; i < width * height; i++) {
-        if(i != idx){
-            cost_so_far[i] = INT32_MAX;
+    for(int x = 0; x < width; x++){
+        visited[x] = (bool *)malloc(height * sizeof(bool));
+        distances[x] = (int *)malloc(height * sizeof(int));
+        for(int y = 0; y < height; y++){
+            visited[x][y] = false;
+            distances[x][y] = INT32_MAX;
         }
     }
-    pq_enqueue(frontier, (Node){start, 0});
 
-    while(!pq_is_empty(frontier)) {
-        Node current_node = *pq_dequeue(frontier);
+    Node start_node = {start, 0};
+    pq_enqueue(frontier, start_node);
+    distances[start.x][start.y] = 0;
 
-        if(current_node.cost > cost_so_far[get_index(current_node.coords.x, current_node.coords.y)]) continue;
-        if(current_node.coords.x == end.x && current_node.coords.y == end.y){
-            result = cost_so_far[get_index(end.x, end.y)];
+    int result = INVALID_COST;
 
-            free(cost_so_far);
-            pq_free(frontier);
+    while(!pq_is_empty(frontier)){
+        Node current = pq_dequeue(frontier);
+        OffsetCoords current_position = current.coords;
+        int current_cost = current.cost;
 
-            return result;
+        // Controllo se ho già visitato la cella quando il costo era migliore
+        if(visited[current_position.x][current_position.y] == true) continue;
+        // Se no, la visito
+        visited[current_position.x][current_position.y] = true;
+        // Controllo se ho raggiunto la destinazione
+        if(current_position.x == end.x && current_position.y == end.y){
+            result = current_cost;
+            break;
         }
+        // Controllo se posso uscire dalla cella
+        if(map[current_position.x][current_position.y].cost == 0) continue;
 
-        Cell *current_cell = &map[current_node.coords.x][current_node.coords.y];
+        // Se non è la destinazione, esploro i vicini. Considero "vicino" anche una cella raggiungibile tramite rotta aerea 
+        OffsetCoords neighbors[MAX_NEIGHBORS + MAX_AIR_ROUTES];
+        int neighbor_cost[MAX_NEIGHBORS + MAX_AIR_ROUTES];
+        int neighbor_count = get_all_neighbors(current_position, neighbors, neighbor_cost);
 
-        // Esploro le rotte aeree
-        if(current_cell->air_routes_arr != NULL){ // Controllo se ci sono rotte aeree
-            for(int i = 0; i < MAX_AIR_ROUTES; i++){
-                AirRoute *current_ar = &current_cell->air_routes_arr[i];
+        for(int i = 0; i < neighbor_count; i++){
+            OffsetCoords neighbor = neighbors[i];
 
-                if(current_ar->to_x != INVALID_COORDS && is_cell_valid(current_ar->to_x, current_ar->to_y)){
-                    OffsetCoords destination = (OffsetCoords){current_ar->to_x, current_ar->to_y};
-                    int new_cost = cost_so_far[get_index(current_node.coords.x, current_node.coords.y)] + current_ar->air_route_cost;
+            if(visited[neighbor.x][neighbor.y] == true) continue;
 
-                    if(new_cost < cost_so_far[get_index(destination.x, destination.y)]){
-                        cost_so_far[get_index(destination.x, destination.y)] = new_cost;
-                        pq_enqueue(frontier, (Node){destination, new_cost});
-                    }
-                }
+            int new_distance = current_cost + neighbor_cost[i];
+
+            if(new_distance < distances[neighbor.x][neighbor.y]){
+                distances[neighbor.x][neighbor.y] = new_distance;
+                Node neighbor_node = {neighbor, new_distance};
+                pq_enqueue(frontier, neighbor_node);
             }
         }
-
-        // Esploro i vicini
-        OffsetCoords neighbors_array[MAX_NEIGHBORS];
-        int neighbors_number = get_neighbors_number(current_node.coords, neighbors_array);
-
-        for(int i = 0; i < neighbors_number; i++){
-            OffsetCoords neighbor = neighbors_array[i];
-            Cell *neighbor_cell = &map[neighbor.x][neighbor.y];
-            int new_cost = cost_so_far[get_index(current_node.coords.x, current_node.coords.y)] + neighbor_cell->cost;
-
-            if(new_cost < cost_so_far[get_index(neighbor.x, neighbor.y)]){
-                cost_so_far[get_index(neighbor.x, neighbor.y)] = new_cost;
-                pq_enqueue(frontier, (Node){neighbor, new_cost});
-            }
-        }
-
     }
 
-    free(cost_so_far);
+    // Pulizia
+    for(int x = 0; x < width; x++){
+        free(visited[x]);
+        free(distances[x]);
+    }
+    free(visited);
+    free(distances);
     pq_free(frontier);
 
     return result;
@@ -317,8 +320,9 @@ void init(int cols, int rows) {
         return;
     }
 
-    if(map != NULL)
+    if(map != NULL){
         clean_all();
+    }
 
     width = cols;   // numero di colonne
     height = rows;  // numero di righe
@@ -366,22 +370,22 @@ void change_cost(int x, int y, int v, int radius) {
         for(int r = center_cube.r - radius; r <= center_cube.r + radius; r++) {
             int s = -q - r;
             CubeCoords current_node_cube = {q, r, s};
-            OffsetCoords current_node_offset = offset_from_cube(OFFSET_ODD, current_node_cube); // Converto in offset per controllarne la validità
-            if(!is_cell_valid(current_node_offset.x, current_node_offset.y))
-                continue;
+            OffsetCoords current_node_offset = offset_from_cube(OFFSET_ODD, current_node_cube); // Converto in offset per controllarne la validità            
+            if(!is_cell_valid(current_node_offset.x, current_node_offset.y)) continue;
             
             int distance = cube_distance(current_node_cube, center_cube);
-            if(distance > radius)
-                continue;
+            if(distance > radius) continue;
 
             Cell *cell = &map[current_node_offset.x][current_node_offset.y];
             double cost_coefficient = ((double)radius - (double)cube_distance(current_node_cube, center_cube)) / (double)radius;
             cell->cost += (int)floor(v * fmax(0.0, cost_coefficient));
 
-            if(cell->cost < 0)
+            if(cell->cost < 0){
                 cell->cost = 0;
-            if(cell->cost > 100)
+            }
+            if(cell->cost > 100){
                 cell->cost = 100;
+            }
 
             update_ar_cost(current_node_offset.x, current_node_offset.y);
         }
