@@ -183,7 +183,7 @@ int get_all_neighbors(OffsetCoords hex, OffsetCoords *neighbors_array, int *cost
         if(ground_neighbor_coords.x == INVALID_COORDS) continue;
 
         neighbors_array[count] = ground_neighbor_coords;
-        costs_array[count] = map[ground_neighbor_coords.x][ground_neighbor_coords.y].cost; // DA RIVEDERE
+        costs_array[count] = map[hex.x][hex.y].cost;
         count++;
     }
 
@@ -239,11 +239,6 @@ void update_ar_cost(int x, int y) {
 }
 
 int dijkstra(OffsetCoords start, OffsetCoords end) {
-    // Controllo subito se le celle sono valide, se posso uscire dalla posizione iniziale oppure se le celle coincidono
-    if(!is_cell_valid(start.x, start.y) || !is_cell_valid(end.x, end.y)) return INVALID_COST;
-    if(map[start.x][start.y].cost == 0) return INVALID_COST;
-    if(start.x == end.x && start.y == end.y) return 0;
-
     PriorityQueue *frontier = pq_init(width * height);
 
     bool **visited = (bool **)malloc(width * sizeof(bool *));
@@ -374,7 +369,7 @@ void change_cost(int x, int y, int v, int radius) {
             if(!is_cell_valid(current_node_offset.x, current_node_offset.y)) continue;
             
             int distance = cube_distance(current_node_cube, center_cube);
-            if(distance > radius) continue;
+            if(distance >= radius) continue; // DA VEDERE
 
             Cell *cell = &map[current_node_offset.x][current_node_offset.y];
             double cost_coefficient = ((double)radius - (double)cube_distance(current_node_cube, center_cube)) / (double)radius;
@@ -440,7 +435,6 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         
     }
     else if(first_empty_idx != -1){ // Aggiunta rotta
-        // int new_cost = calculate_ar_cost(start);
         AirRoute *route = &start->air_routes_arr[first_empty_idx];
         Cell *cell = &map[x1][y1];
         route->to_x = x2;
@@ -456,10 +450,11 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
 
 int travel_cost(int xp, int yp, int xd, int yd) {
     if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd)) return INVALID_COST;
-
+    if(map[xp][yp].cost == 0) return INVALID_COST;
     if(xp == xd && yp == yd) return 0;
 
     int cost = dijkstra((OffsetCoords){xp, yp}, (OffsetCoords){xd, yd});
+
     return cost;
 }
 
