@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <math.h>
 #include <assert.h>
+#include <time.h>
 
 #define MAX_AIR_ROUTES 5
 #define MAX_NEIGHBORS 6
@@ -440,11 +441,11 @@ void change_cost(int x, int y, int v, int radius) {
         for(int r = center_cube.r - radius; r <= center_cube.r + radius; r++) {
             int s = -q - r;
             CubeCoords current_node_cube = {q, r, s};
-            OffsetCoords current_node_offset = offset_from_cube(OFFSET_ODD, current_node_cube); // Converto in offset per controllarne la validità            
+            OffsetCoords current_node_offset = offset_from_cube(OFFSET_ODD, current_node_cube); // Converto in offset per controllarne la validità        
             if(!is_cell_valid(current_node_offset.x, current_node_offset.y)) continue;
             
             int distance = cube_distance(current_node_cube, center_cube);
-            if(distance >= radius) continue; // DA VEDERE
+            if(distance >= radius) continue;
 
             Cell *cell = &map[current_node_offset.x][current_node_offset.y];
             double cost_coefficient = ((double)radius - (double)cube_distance(current_node_cube, center_cube)) / (double)radius;
@@ -529,16 +530,19 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
 
 int travel_cost(int xp, int yp, int xd, int yd) {
     if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd)) return INVALID_COST;
-    if(map[xp][yp].cost == 0) return INVALID_COST;
     if(xp == xd && yp == yd) return 0;
+    if(map[xp][yp].cost == 0) return INVALID_COST;
 
     if(cache != NULL){
         int cached_cost = cache_search(xp, yp, xd, yd);
-        if(cached_cost != CACHE_MISS) return cached_cost;
+        if(cached_cost != CACHE_MISS){
+            printf("Cache hit\n");
+            return cached_cost;
+        }
     }
 
     int cost = dijkstra((OffsetCoords){xp, yp}, (OffsetCoords){xd, yd});
-    if(cost != INVALID_COST && cache != NULL){
+    if(cache != NULL){
         cache_insert(xp, yp, xd, yd, cost);
     }
 
@@ -551,6 +555,9 @@ int main(int argc, char *argv[]) {
     char *buffer;
     size_t bufsize = 100;
     size_t length;
+
+    time_t start_time, end_time;
+    start_time = time(NULL);
 
     buffer = (char *)malloc(bufsize * sizeof(char));
     if(buffer == NULL)
@@ -631,6 +638,9 @@ int main(int argc, char *argv[]) {
     }
 
     clean_all();
+
+    end_time = time(NULL);
+    printf("Execution time: %ld seconds\n", end_time - start_time);
 
     return 0;
 }
