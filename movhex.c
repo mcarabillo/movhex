@@ -536,7 +536,7 @@ int travel_cost(int xp, int yp, int xd, int yd) {
     if(cache != NULL){
         int cached_cost = cache_search(xp, yp, xd, yd);
         if(cached_cost != CACHE_MISS){
-            printf("Cache hit\n");
+            // printf("Cache hit\n");
             return cached_cost;
         }
     }
@@ -556,8 +556,8 @@ int main(int argc, char *argv[]) {
     size_t bufsize = 100;
     size_t length;
 
-    time_t start_time, end_time;
-    start_time = time(NULL);
+    // time_t start_time, end_time;
+    // start_time = time(NULL);
 
     buffer = (char *)malloc(bufsize * sizeof(char));
     if(buffer == NULL)
@@ -639,8 +639,8 @@ int main(int argc, char *argv[]) {
 
     clean_all();
 
-    end_time = time(NULL);
-    printf("Execution time: %ld seconds\n", end_time - start_time);
+    // end_time = time(NULL);
+    // printf("Execution time: %ld seconds\n", end_time - start_time);
 
     return 0;
 }
