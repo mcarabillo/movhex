@@ -11,6 +11,8 @@
 #define OFFSET_ODD -1
 #define INVALID_COORDS -99
 #define INVALID_COST -1
+#define CACHE_MISS -99
+#define CACHE_SIZE 5563
 
 // Structs
 typedef struct{
@@ -44,10 +46,18 @@ typedef struct{
     int max_capacity;
 } PriorityQueue;
 
+typedef struct{
+    int xp, yp, xd, yd;
+    int cost;
+    bool valid;
+} CacheEntry;
+
 // Variabili e costanti globali
 int width, height;
 
 Cell **map = NULL;
+
+CacheEntry *cache = NULL;
 
 const CubeCoords neighbors_dir[MAX_NEIGHBORS] = {
     {1, -1, 0}, {1, 0, -1}, {0, 1, -1},
@@ -69,6 +79,7 @@ inline CubeCoords cube_sub(CubeCoords a, CubeCoords b) {
 
 inline int cube_len(CubeCoords h) {
     assert(h.q + h.r + h.s == 0);
+
     return ceil(((abs(h.q) + abs(h.r) + abs(h.s)) / 2.0));
 }
 
@@ -95,15 +106,51 @@ inline bool pq_is_empty(PriorityQueue *pq) {
     return pq->size == 0;
 }
 
-PriorityQueue *pq_init(int max_capacity) {
-    PriorityQueue *pq = (PriorityQueue *)malloc(sizeof(PriorityQueue));
-    pq->nodes = (Node *)malloc(max_capacity * sizeof(Node));
-    pq->size = 0;
-    pq->max_capacity = max_capacity;
-    return pq;
+inline unsigned int hash_function(int x1, int y1, int x2, int y2) {
+    unsigned int hash = 17;
+    hash = hash * 31 + (unsigned int)x1;
+    hash = hash * 31 + (unsigned int)y1;
+    hash = hash * 31 + (unsigned int)x2;
+    hash = hash * 31 + (unsigned int)y2;
+    return hash % CACHE_SIZE;
 }
 
-void heapify_up(PriorityQueue *pq, int idx) {
+inline void invalidate_cache() {
+    if(cache == NULL) return;
+
+    for(int i = 0; i < CACHE_SIZE; i++) {
+        cache[i].valid = false;
+    }
+}
+
+inline int cache_search(int x1, int y1, int x2, int y2) {
+    if(cache == NULL) return CACHE_MISS;
+
+    unsigned int key = hash_function(x1, y1, x2, y2);
+    CacheEntry *entry = &cache[key];
+
+    if(entry->valid == true && entry->xp == x1 && entry->yp == y1 && entry->xd == x2 && entry->yd == y2) {
+        return entry->cost;
+    }
+
+    return CACHE_MISS;
+}
+
+inline void cache_insert(int x1, int y1, int x2, int y2, int cost) {
+    assert(cache != NULL);
+
+    unsigned int key = hash_function(x1, y1, x2, y2);
+    CacheEntry *entry = &cache[key];
+
+    entry->xp = x1;
+    entry->yp = y1;
+    entry->xd = x2;
+    entry->yd = y2;
+    entry->cost = cost;
+    entry->valid = true;
+}
+
+inline void heapify_up(PriorityQueue *pq, int idx) {
     while(idx > 0){
         int parent = (idx - 1) / 2;
         if(pq->nodes[idx].cost >= pq->nodes[parent].cost) break;
@@ -116,7 +163,7 @@ void heapify_up(PriorityQueue *pq, int idx) {
     }
 }
 
-void heapify_down(PriorityQueue *pq, int idx) {
+inline void heapify_down(PriorityQueue *pq, int idx) {
     int left, right, smallest;
     while(true){
         left = 2 * idx + 1;
@@ -137,7 +184,7 @@ void heapify_down(PriorityQueue *pq, int idx) {
     }
 }
 
-void pq_enqueue(PriorityQueue *pq, Node node) {
+inline void pq_enqueue(PriorityQueue *pq, Node node) {
     if(pq->size < pq->max_capacity) {
         pq->nodes[pq->size] = node;
         pq->size++;
@@ -145,7 +192,7 @@ void pq_enqueue(PriorityQueue *pq, Node node) {
     }
 }
 
-Node pq_dequeue(PriorityQueue *pq) {
+inline Node pq_dequeue(PriorityQueue *pq) {
     assert(pq->size > 0);
     
     Node minimum = pq->nodes[0];
@@ -155,11 +202,33 @@ Node pq_dequeue(PriorityQueue *pq) {
     return minimum;
 }
 
+PriorityQueue *pq_init(int max_capacity) {
+    PriorityQueue *pq = (PriorityQueue *)malloc(sizeof(PriorityQueue));
+    pq->nodes = (Node *)malloc(max_capacity * sizeof(Node));
+    pq->size = 0;
+    pq->max_capacity = max_capacity;
+    return pq;
+}
+
 void pq_free(PriorityQueue *pq) {
     if(pq != NULL) {
         free(pq->nodes);
         free(pq);
     }
+}
+
+CacheEntry *cache_init() {
+    CacheEntry *cache = (CacheEntry *)malloc(CACHE_SIZE * sizeof(CacheEntry));
+    if(cache == NULL) {
+        printf("cache allocation error in cache_init\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for(int i = 0; i < CACHE_SIZE; i++) {
+        cache[i].valid = false;
+    }
+
+    return cache;
 }
 
 OffsetCoords find_ground_neighbor(int dir, CubeCoords hex) {
@@ -220,7 +289,7 @@ void clean_all() {
         free(map[0]);
         free(map);
         map = NULL;
-    }
+    }    
 }
 
 void update_ar_cost(int x, int y) {
@@ -319,8 +388,15 @@ void init(int cols, int rows) {
         clean_all();
     }
 
-    width = cols;   // numero di colonne
-    height = rows;  // numero di righe
+    if(cache == NULL){
+        cache = cache_init();
+    }
+    else{
+        invalidate_cache();
+    }
+
+    width = cols;   
+    height = rows;  
     
     map = (Cell **)malloc(width * sizeof(Cell *));
     if(map == NULL) {
@@ -328,19 +404,16 @@ void init(int cols, int rows) {
         exit(EXIT_FAILURE);
     }
 
-    // Alloca un singolo array contiguo per tutte le celle
     map[0] = (Cell *)malloc(width * height * sizeof(Cell));
     if(map[0] == NULL) {
         printf("map allocation error in init\n");
         exit(EXIT_FAILURE);
     }
 
-    // Imposta i puntatori per ogni colonna
     for(int x = 1; x < width; x++) {
-        map[x] = map[0] + x * height;  // Ogni colonna ha 'height' elementi
+        map[x] = map[0] + x * height;
     }
 
-    // Inizializza tutte le celle
     for(int x = 0; x < width; x++){ // x = colonna
         for(int y = 0; y < height; y++){ // y = riga
             Cell *cell = &map[x][y];
@@ -358,6 +431,8 @@ void change_cost(int x, int y, int v, int radius) {
         printf("KO\n");
         return;
     }
+
+    invalidate_cache();
 
     CubeCoords center_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){x, y}); // Trovo le coordinate cubiche del centro
 
@@ -430,6 +505,8 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         route->air_route_cost = 0;
         start->air_routes_number--;
 
+        invalidate_cache();
+
         printf("OK\n");
         return;
         
@@ -442,6 +519,8 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         route->air_route_cost = cell->cost;
         start->air_routes_number++;
 
+        invalidate_cache();
+
         printf("OK\n");
         return;
     }
@@ -453,7 +532,15 @@ int travel_cost(int xp, int yp, int xd, int yd) {
     if(map[xp][yp].cost == 0) return INVALID_COST;
     if(xp == xd && yp == yd) return 0;
 
+    if(cache != NULL){
+        int cached_cost = cache_search(xp, yp, xd, yd);
+        if(cached_cost != CACHE_MISS) return cached_cost;
+    }
+
     int cost = dijkstra((OffsetCoords){xp, yp}, (OffsetCoords){xd, yd});
+    if(cost != INVALID_COST && cache != NULL){
+        cache_insert(xp, yp, xd, yd, cost);
+    }
 
     return cost;
 }
@@ -537,5 +624,13 @@ int main(int argc, char *argv[]) {
     }
 
     free(buffer);
+
+    if(cache != NULL){
+        free(cache);
+        cache = NULL;
+    }
+
+    clean_all();
+
     return 0;
 }
