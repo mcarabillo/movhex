@@ -251,7 +251,7 @@ OffsetCoords find_ground_neighbor(int dir, CubeCoords hex) {
     return ground_neighbor_coords_offset;
 }
 
-int get_all_neighbors(OffsetCoords hex, OffsetCoords *neighbors_array, int *costs_array) { // Considero come vicini anche gli esagoni raggiungibili tramite rotta aerea
+int get_all_neighbors(OffsetCoords hex, OffsetCoords neighbors_array[MAX_NEIGHBORS + MAX_AIR_ROUTES], int costs_array[MAX_NEIGHBORS + MAX_AIR_ROUTES]) { // Considero come vicini anche gli esagoni raggiungibili tramite rotta aerea
     int count = 0;
     CubeCoords hex_coords_cube = cube_from_offset(OFFSET_ODD, hex);
 
