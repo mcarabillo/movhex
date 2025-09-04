@@ -34,7 +34,6 @@ typedef struct{
     int cost; // Da 0 a 100, inizializzato a 1
     int air_routes_number; // Numero di rotte aeree (massimo 5 per cella)
     AirRoute *air_routes_arr; // Array di rotte aeree
-    OffsetCoords *ground_neighbors_arr; // Array di vicini terrestri
 } Cell;
 
 typedef struct{
@@ -445,7 +444,6 @@ void init(int cols, int rows) {
     for(int x = 0; x < width; x++){ // x = colonna
         for(int y = 0; y < height; y++){ // y = riga
             Cell *cell = &map[x][y];
-            cell->ground_neighbors_arr = NULL;
             cell->air_routes_arr = NULL;
             cell->air_routes_number = 0;
             cell->cost = 1;
@@ -596,7 +594,7 @@ int main(int argc, char *argv[]) {
     size_t bufsize = 100;
     size_t length;
 
-    // time_t start_time, end_time;
+    // time_t start_time;
     // start_time = time(NULL);
 
     buffer = (char *)malloc(bufsize * sizeof(char));
@@ -690,7 +688,7 @@ int main(int argc, char *argv[]) {
 
     clean_all();
 
-    // end_time = time(NULL);
+    // time_t end_time = time(NULL);
     // printf("Execution time: %ld seconds\n", end_time - start_time);
 
     return 0;
