@@ -57,8 +57,9 @@ typedef struct{
 int width, height;
 
 Cell **map = NULL;
-
 CacheData *cache = NULL;
+bool **visited = NULL;
+int **distances = NULL;
 
 const CubeCoords neighbors_dir[MAX_NEIGHBORS] = {
     {1, -1, 0}, {1, 0, -1}, {0, 1, -1},
@@ -213,8 +214,8 @@ inline PQNode pq_dequeue(PriorityQueue *pq) {
 }
 
 PriorityQueue *pq_init(int max_capacity) {
-    PriorityQueue *pq = (PriorityQueue *)malloc(sizeof(PriorityQueue));
-    pq->nodes = (PQNode *)malloc(max_capacity * sizeof(PQNode));
+    PriorityQueue *pq = malloc(sizeof(PriorityQueue));
+    pq->nodes = malloc(max_capacity * sizeof(PQNode));
     pq->size = 0;
     pq->max_capacity = max_capacity;
 
@@ -229,11 +230,7 @@ void pq_free(PriorityQueue *pq) {
 }
 
 CacheData *cache_init() {
-    CacheData *cache = (CacheData *)malloc(CACHE_SIZE * sizeof(CacheData));
-    if(cache == NULL) {
-        printf("cache allocation error in cache_init\n");
-        exit(EXIT_FAILURE);
-    }
+    CacheData *cache = malloc(CACHE_SIZE * sizeof(CacheData));
 
     for(int i = 0; i < CACHE_SIZE; i++) {
         cache[i].valid = false;
@@ -306,7 +303,23 @@ void clean_all() {
         free(map[0]);
         free(map);
         map = NULL;
-    }    
+    }
+    
+    if(visited != NULL) {
+        for(int x = 0; x < width; x++){
+            free(visited[x]);
+        }
+        free(visited);
+        visited = NULL;
+    }
+
+    if(distances != NULL) {
+        for(int x = 0; x < width; x++){
+            free(distances[x]);
+        }
+        free(distances);
+        distances = NULL;
+    }
 }
 
 void update_ar_cost(int x, int y) {
@@ -331,12 +344,7 @@ void update_ar_cost(int x, int y) {
 int dijkstra(OffsetCoords start, OffsetCoords end) {
     PriorityQueue *frontier = pq_init(width * height);
 
-    bool **visited = (bool **)malloc(width * sizeof(bool *));
-    int **distances = (int **)malloc(width * sizeof(int *));
-
     for(int x = 0; x < width; x++){
-        visited[x] = (bool *)malloc(height * sizeof(bool));
-        distances[x] = (int *)malloc(height * sizeof(int));
         for(int y = 0; y < height; y++){
             visited[x][y] = false;
             distances[x][y] = INT32_MAX;
@@ -392,13 +400,6 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
         }
     }
 
-    // Pulizia
-    for(int x = 0; x < width; x++){
-        free(visited[x]);
-        free(distances[x]);
-    }
-    free(visited);
-    free(distances);
     pq_free(frontier);
 
     return result;
@@ -425,20 +426,19 @@ void init(int cols, int rows) {
     width = cols;   
     height = rows;  
     
-    map = (Cell **)malloc(width * sizeof(Cell *));
-    if(map == NULL) {
-        printf("map allocation error in init\n");
-        exit(EXIT_FAILURE);
-    }
+    map = malloc(width * sizeof(Cell *));
 
-    map[0] = (Cell *)malloc(width * height * sizeof(Cell));
-    if(map[0] == NULL) {
-        printf("map allocation error in init\n");
-        exit(EXIT_FAILURE);
-    }
+    map[0] = malloc(width * height * sizeof(Cell));
 
     for(int x = 1; x < width; x++) {
         map[x] = map[0] + x * height;
+    }
+
+    visited = malloc(width * sizeof(bool *));
+    distances = malloc(width * sizeof(int *));
+    for(int x = 0; x < width; x++){
+        visited[x] = malloc(height * sizeof(bool));
+        distances[x] = malloc(height * sizeof(int));
     }
 
     for(int x = 0; x < width; x++){ // x = colonna
@@ -478,7 +478,7 @@ void change_cost(int x, int y, int v, int radius) {
             }
 
             Cell *cell = &map[current_node_offset.x][current_node_offset.y];
-            double cost_coefficient = ((double)radius - (double)cube_distance(current_node_cube, center_cube)) / (double)radius;
+            double cost_coefficient = ((double)radius - (double)distance) / (double)radius;
             cell->cost += (int)floor(v * fmax(0.0, cost_coefficient));
 
             if(cell->cost < 0){
@@ -505,7 +505,7 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
 
     // Inizializzazione array rotte
     if(start->air_routes_arr == NULL){
-        start->air_routes_arr = (AirRoute *)malloc(MAX_AIR_ROUTES * sizeof(AirRoute));
+        start->air_routes_arr = malloc(MAX_AIR_ROUTES * sizeof(AirRoute));
 
         for(int i = 0; i < MAX_AIR_ROUTES; i++){
             start->air_routes_arr[i].to_x = INVALID_COORDS;
@@ -536,7 +536,15 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         route->air_route_cost = 0;
         start->air_routes_number--;
 
-        invalidate_cache();
+        if(cache != NULL){
+            for(int i = 0; i < CACHE_SIZE; i++){
+                if(cache[i].valid == true){
+                    if((cache[i].xp == x1 && cache[i].yp == y1) || (cache[i].xp == x2 && cache[i].yp == y2)){
+                        cache[i].valid = false;
+                    }
+                }
+            }
+        }
 
         printf("OK\n");
         return;
@@ -597,7 +605,7 @@ int main(int argc, char *argv[]) {
     // time_t start_time;
     // start_time = time(NULL);
 
-    buffer = (char *)malloc(bufsize * sizeof(char));
+    buffer = malloc(bufsize * sizeof(char));
     if(buffer == NULL){
         exit(EXIT_FAILURE);
     }
