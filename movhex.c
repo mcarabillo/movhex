@@ -34,15 +34,16 @@ typedef struct{
     int cost; // Da 0 a 100, inizializzato a 1
     int air_routes_number; // Numero di rotte aeree (massimo 5 per cella)
     AirRoute *air_routes_arr; // Array di rotte aeree
+    OffsetCoords *ground_neighbors_arr; // Array di vicini terrestri
 } Cell;
 
 typedef struct{
     OffsetCoords coords;
     int cost; // Distanza
-} Node;
+} PQNode;
 
 typedef struct{
-    Node *nodes;
+    PQNode *nodes;
     int size;
     int max_capacity;
 } PriorityQueue;
@@ -51,14 +52,14 @@ typedef struct{
     int xp, yp, xd, yd;
     int cost;
     bool valid;
-} CacheEntry;
+} CacheData;
 
 // Variabili e costanti globali
 int width, height;
 
 Cell **map = NULL;
 
-CacheEntry *cache = NULL;
+CacheData *cache = NULL;
 
 const CubeCoords neighbors_dir[MAX_NEIGHBORS] = {
     {1, -1, 0}, {1, 0, -1}, {0, 1, -1},
@@ -113,11 +114,14 @@ inline unsigned int hash_function(int x1, int y1, int x2, int y2) {
     hash = hash * 31 + (unsigned int)y1;
     hash = hash * 31 + (unsigned int)x2;
     hash = hash * 31 + (unsigned int)y2;
+
     return hash % CACHE_SIZE;
 }
 
 inline void invalidate_cache() {
-    if(cache == NULL) return;
+    if(cache == NULL){
+        return;
+    }
 
     for(int i = 0; i < CACHE_SIZE; i++) {
         cache[i].valid = false;
@@ -125,10 +129,12 @@ inline void invalidate_cache() {
 }
 
 inline int cache_search(int x1, int y1, int x2, int y2) {
-    if(cache == NULL) return CACHE_MISS;
+    if(cache == NULL){
+        return CACHE_MISS;
+    }
 
     unsigned int key = hash_function(x1, y1, x2, y2);
-    CacheEntry *entry = &cache[key];
+    CacheData *entry = &cache[key];
 
     if(entry->valid == true && entry->xp == x1 && entry->yp == y1 && entry->xd == x2 && entry->yd == y2) {
         return entry->cost;
@@ -141,7 +147,7 @@ inline void cache_insert(int x1, int y1, int x2, int y2, int cost) {
     assert(cache != NULL);
 
     unsigned int key = hash_function(x1, y1, x2, y2);
-    CacheEntry *entry = &cache[key];
+    CacheData *entry = &cache[key];
 
     entry->xp = x1;
     entry->yp = y1;
@@ -156,7 +162,7 @@ inline void heapify_up(PriorityQueue *pq, int idx) {
         int parent = (idx - 1) / 2;
         if(pq->nodes[idx].cost >= pq->nodes[parent].cost) break;
 
-        Node temp = pq->nodes[idx];
+        PQNode temp = pq->nodes[idx];
         pq->nodes[idx] = pq->nodes[parent];
         pq->nodes[parent] = temp;
 
@@ -171,21 +177,24 @@ inline void heapify_down(PriorityQueue *pq, int idx) {
         right = 2 * idx + 2;
         smallest = idx;
 
-        if(left < pq->size && pq->nodes[left].cost < pq->nodes[smallest].cost)
+        if(left < pq->size && pq->nodes[left].cost < pq->nodes[smallest].cost){
             smallest = left;
-        if(right < pq->size && pq->nodes[right].cost < pq->nodes[smallest].cost)
+        }
+        if(right < pq->size && pq->nodes[right].cost < pq->nodes[smallest].cost){
             smallest = right;
-        if(smallest == idx) break;
+        }
+        if(smallest == idx){
+            break;
+        }
 
-        Node temp = pq->nodes[idx];
+        PQNode temp = pq->nodes[idx];
         pq->nodes[idx] = pq->nodes[smallest];
         pq->nodes[smallest] = temp;
-
         idx = smallest;
     }
 }
 
-inline void pq_enqueue(PriorityQueue *pq, Node node) {
+inline void pq_enqueue(PriorityQueue *pq, PQNode node) {
     if(pq->size < pq->max_capacity) {
         pq->nodes[pq->size] = node;
         pq->size++;
@@ -193,21 +202,23 @@ inline void pq_enqueue(PriorityQueue *pq, Node node) {
     }
 }
 
-inline Node pq_dequeue(PriorityQueue *pq) {
+inline PQNode pq_dequeue(PriorityQueue *pq) {
     assert(pq->size > 0);
     
-    Node minimum = pq->nodes[0];
+    PQNode minimum = pq->nodes[0];
     pq->nodes[0] = pq->nodes[pq->size - 1];
     pq->size--;
     heapify_down(pq, 0);
+
     return minimum;
 }
 
 PriorityQueue *pq_init(int max_capacity) {
     PriorityQueue *pq = (PriorityQueue *)malloc(sizeof(PriorityQueue));
-    pq->nodes = (Node *)malloc(max_capacity * sizeof(Node));
+    pq->nodes = (PQNode *)malloc(max_capacity * sizeof(PQNode));
     pq->size = 0;
     pq->max_capacity = max_capacity;
+
     return pq;
 }
 
@@ -218,8 +229,8 @@ void pq_free(PriorityQueue *pq) {
     }
 }
 
-CacheEntry *cache_init() {
-    CacheEntry *cache = (CacheEntry *)malloc(CACHE_SIZE * sizeof(CacheEntry));
+CacheData *cache_init() {
+    CacheData *cache = (CacheData *)malloc(CACHE_SIZE * sizeof(CacheData));
     if(cache == NULL) {
         printf("cache allocation error in cache_init\n");
         exit(EXIT_FAILURE);
@@ -237,7 +248,9 @@ OffsetCoords find_ground_neighbor(int dir, CubeCoords hex) {
     CubeCoords ground_neighbor_coords_cube = cube_add(hex, delta);
     OffsetCoords ground_neighbor_coords_offset = offset_from_cube(OFFSET_ODD, ground_neighbor_coords_cube);
 
-    if(!is_cell_valid(ground_neighbor_coords_offset.x, ground_neighbor_coords_offset.y)) return (OffsetCoords){INVALID_COORDS, INVALID_COORDS};
+    if(!is_cell_valid(ground_neighbor_coords_offset.x, ground_neighbor_coords_offset.y)){
+        return (OffsetCoords){INVALID_COORDS, INVALID_COORDS};
+    }
 
     return ground_neighbor_coords_offset;
 }
@@ -250,7 +263,9 @@ int get_all_neighbors(OffsetCoords hex, OffsetCoords *neighbors_array, int *cost
     for(int i = 0; i < MAX_NEIGHBORS; i++) {
         OffsetCoords ground_neighbor_coords = find_ground_neighbor(i, hex_coords_cube);
 
-        if(ground_neighbor_coords.x == INVALID_COORDS) continue;
+        if(ground_neighbor_coords.x == INVALID_COORDS){
+            continue;
+        }
 
         neighbors_array[count] = ground_neighbor_coords;
         costs_array[count] = map[hex.x][hex.y].cost;
@@ -260,7 +275,9 @@ int get_all_neighbors(OffsetCoords hex, OffsetCoords *neighbors_array, int *cost
     // Vicini aerei
     Cell *current_cell = &map[hex.x][hex.y];
 
-    if(current_cell->air_routes_arr == NULL) return count;
+    if(current_cell->air_routes_arr == NULL){
+        return count;
+    }
 
     for(int i = 0; i < MAX_AIR_ROUTES; i++){
         AirRoute *route = &current_cell->air_routes_arr[i];
@@ -294,10 +311,14 @@ void clean_all() {
 }
 
 void update_ar_cost(int x, int y) {
-    if(!is_cell_valid(x, y)) return;
+    if(!is_cell_valid(x, y)){
+        return;
+    }
     
     Cell *cell = &map[x][y];
-    if(cell->air_routes_arr == NULL) return;
+    if(cell->air_routes_arr == NULL){
+        return;
+    }
     
     for(int i = 0; i < MAX_AIR_ROUTES; i++) {
         AirRoute *route = &cell->air_routes_arr[i];
@@ -323,19 +344,21 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
         }
     }
 
-    Node start_node = {start, 0};
+    PQNode start_node = {start, 0};
     pq_enqueue(frontier, start_node);
     distances[start.x][start.y] = 0;
 
     int result = INVALID_COST;
 
     while(!pq_is_empty(frontier)){
-        Node current = pq_dequeue(frontier);
+        PQNode current = pq_dequeue(frontier);
         OffsetCoords current_position = current.coords;
         int current_cost = current.cost;
 
         // Controllo se ho già visitato la cella quando il costo era migliore
-        if(visited[current_position.x][current_position.y] == true) continue;
+        if(visited[current_position.x][current_position.y] == true){
+            continue;
+        }
         // Se no, la visito
         visited[current_position.x][current_position.y] = true;
         // Controllo se ho raggiunto la destinazione
@@ -344,7 +367,9 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
             break;
         }
         // Controllo se posso uscire dalla cella
-        if(map[current_position.x][current_position.y].cost == 0) continue;
+        if(map[current_position.x][current_position.y].cost == 0){
+            continue;
+        }
 
         // Se non è la destinazione, esploro i vicini. Considero "vicino" anche una cella raggiungibile tramite rotta aerea 
         OffsetCoords neighbors[MAX_NEIGHBORS + MAX_AIR_ROUTES];
@@ -354,13 +379,15 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
         for(int i = 0; i < neighbor_count; i++){
             OffsetCoords neighbor = neighbors[i];
 
-            if(visited[neighbor.x][neighbor.y] == true) continue;
+            if(visited[neighbor.x][neighbor.y] == true){
+                continue;
+            }
 
             int new_distance = current_cost + neighbor_cost[i];
 
             if(new_distance < distances[neighbor.x][neighbor.y]){
                 distances[neighbor.x][neighbor.y] = new_distance;
-                Node neighbor_node = {neighbor, new_distance};
+                PQNode neighbor_node = {neighbor, new_distance};
                 pq_enqueue(frontier, neighbor_node);
             }
         }
@@ -418,6 +445,7 @@ void init(int cols, int rows) {
     for(int x = 0; x < width; x++){ // x = colonna
         for(int y = 0; y < height; y++){ // y = riga
             Cell *cell = &map[x][y];
+            cell->ground_neighbors_arr = NULL;
             cell->air_routes_arr = NULL;
             cell->air_routes_number = 0;
             cell->cost = 1;
@@ -442,10 +470,14 @@ void change_cost(int x, int y, int v, int radius) {
             int s = -q - r;
             CubeCoords current_node_cube = {q, r, s};
             OffsetCoords current_node_offset = offset_from_cube(OFFSET_ODD, current_node_cube); // Converto in offset per controllarne la validità        
-            if(!is_cell_valid(current_node_offset.x, current_node_offset.y)) continue;
-            
+            if(!is_cell_valid(current_node_offset.x, current_node_offset.y)){
+                continue;
+            }
+
             int distance = cube_distance(current_node_cube, center_cube);
-            if(distance >= radius) continue;
+            if(distance >= radius){
+                continue;
+            }
 
             Cell *cell = &map[current_node_offset.x][current_node_offset.y];
             double cost_coefficient = ((double)radius - (double)cube_distance(current_node_cube, center_cube)) / (double)radius;
@@ -525,13 +557,21 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         printf("OK\n");
         return;
     }
-    else printf("KO\n");
+    else{
+        printf("KO\n");
+    }
 }
 
 int travel_cost(int xp, int yp, int xd, int yd) {
-    if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd)) return INVALID_COST;
-    if(xp == xd && yp == yd) return 0;
-    if(map[xp][yp].cost == 0) return INVALID_COST;
+    if(!is_cell_valid(xp, yp) || !is_cell_valid(xd, yd)){
+        return INVALID_COST;
+    }
+    if(xp == xd && yp == yd){
+        return 0;
+    }
+    if(map[xp][yp].cost == 0){
+        return INVALID_COST;
+    }
 
     if(cache != NULL){
         int cached_cost = cache_search(xp, yp, xd, yd);
@@ -560,17 +600,20 @@ int main(int argc, char *argv[]) {
     // start_time = time(NULL);
 
     buffer = (char *)malloc(bufsize * sizeof(char));
-    if(buffer == NULL)
+    if(buffer == NULL){
         exit(EXIT_FAILURE);
+    }
     
     while((length = getline(&buffer, &bufsize, stdin)) != EOF){
 
-        if(length > 0 && buffer[length - 1] == '\n')
+        if(length > 0 && buffer[length - 1] == '\n'){
             buffer[length - 1] = '\0';
+        }
 
         char *cmd = strtok(buffer, " ");
-        if(cmd == NULL)
+        if(cmd == NULL){
             continue;
+        }
 
         if(strcmp(cmd, "init") == 0){
             char *param1 = strtok(NULL, " ");
@@ -580,7 +623,9 @@ int main(int argc, char *argv[]) {
                 int rows = atoi(param2);
                 init(cols, rows);
             }
-            else printf("KO\n");
+            else{
+                printf("KO\n");
+            }
         }
         else if(strcmp(cmd, "change_cost") == 0){
             char *param1 = strtok(NULL, " ");
@@ -594,7 +639,9 @@ int main(int argc, char *argv[]) {
                 int radius = atoi(param4);
                 change_cost(x, y, v, radius);
             }
-            else printf("KO\n");
+            else{
+                printf("KO\n");
+            }
         }
         else if(strcmp(cmd, "toggle_air_route") == 0){
             char *param1 = strtok(NULL, " ");
@@ -608,7 +655,9 @@ int main(int argc, char *argv[]) {
                 int y2 = atoi(param4);
                 toggle_air_routes(x1, y1, x2, y2);
             }
-            else printf("KO\n");
+            else{
+                printf("KO\n");
+            }
         }
         else if(strcmp(cmd, "travel_cost") == 0){
             char *param1 = strtok(NULL, " ");
@@ -623,7 +672,9 @@ int main(int argc, char *argv[]) {
                 int cost = travel_cost(xp, yp, xd, yd);
                 printf("%d\n", cost);
             }
-            else printf("-1\n");
+            else{
+                printf("-1\n");
+            }
         }
         else{
             printf("No command %s\n", buffer);
