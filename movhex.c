@@ -56,7 +56,7 @@ typedef struct{
 
 // Variabili e costanti globali
 int width, height;
-bool is_map_fresh = true;
+bool map_fresh = true;
 Cell **map = NULL;
 CacheData *cache = NULL;
 int **distances = NULL;
@@ -183,7 +183,7 @@ inline PQNode pq_dequeue(PriorityQueue *pq) {
     return minimum;
 }
 
-inline unsigned int paths_hash_function(int x1, int y1, int x2, int y2) {
+inline unsigned int hash_function(int x1, int y1, int x2, int y2) {
     unsigned int hash = 17;
     hash = hash * 31 + (unsigned int)x1;
     hash = hash * 31 + (unsigned int)y1;
@@ -218,7 +218,7 @@ inline int cache_search(int x1, int y1, int x2, int y2) {
         return CACHE_MISS;
     }
 
-    unsigned int key = paths_hash_function(x1, y1, x2, y2);
+    unsigned int key = hash_function(x1, y1, x2, y2);
     CacheData *entry = &cache[key];
 
     if(entry->valid == true && entry->xp == x1 && entry->yp == y1 && entry->xd == x2 && entry->yd == y2) {
@@ -231,7 +231,7 @@ inline int cache_search(int x1, int y1, int x2, int y2) {
 inline void cache_insert(int x1, int y1, int x2, int y2, int cost) {
     assert(cache != NULL);
 
-    unsigned int key = paths_hash_function(x1, y1, x2, y2);
+    unsigned int key = hash_function(x1, y1, x2, y2);
     CacheData *entry = &cache[key];
 
     entry->xp = x1;
@@ -411,7 +411,7 @@ void init(int cols, int rows) {
 
     if(map != NULL){
         clean_all();
-        is_map_fresh = true;
+        map_fresh = true;
     }
 
     if(cache == NULL){
@@ -487,7 +487,10 @@ void change_cost(int x, int y, int v, int radius) {
         }
     }
 
-    is_map_fresh = false;
+    if(map_fresh == true){
+        map_fresh = false;
+    }
+
     printf("OK\n");
 }
 
@@ -495,6 +498,10 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
     if(!is_cell_valid(x1, y1) || !is_cell_valid(x2, y2) || (x1 == x2 && y1 == y2)) {
         printf("KO\n");
         return;
+    }
+
+    if(map_fresh == true){
+        map_fresh = false;
     }
 
     Cell *start = &map[x1][y1];
@@ -548,9 +555,7 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
 
         invalidate_cache();
 
-        is_map_fresh = false;
         printf("OK\n");
-
         return;
     }
     else{
@@ -569,16 +574,16 @@ int travel_cost(int xp, int yp, int xd, int yd) {
         return INVALID_COST;
     }
 
-    if(is_map_fresh == true){
+    if(map_fresh == true){
         CubeCoords start_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){xp, yp});
         CubeCoords end_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){xd, yd});
+
         return cube_distance(end_cube, start_cube);
     }
 
     if(cache != NULL){
         int cached_cost = cache_search(xp, yp, xd, yd);
         if(cached_cost != CACHE_MISS){
-            // printf("Cache hit\n");
             return cached_cost;
         }
     }
