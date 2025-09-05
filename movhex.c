@@ -13,7 +13,7 @@
 #define INVALID_COORDS -99
 #define INVALID_COST -1
 #define CACHE_MISS -99
-#define CACHE_SIZE 5563
+#define CACHE_SIZE 6271
 
 // Structs
 typedef struct{
@@ -39,6 +39,7 @@ typedef struct{
 typedef struct{
     OffsetCoords coords;
     int cost; // Distanza
+    bool visited;
 } PQNode;
 
 typedef struct{
@@ -55,16 +56,16 @@ typedef struct{
 
 // Variabili e costanti globali
 int width, height;
-
+bool is_map_fresh = true;
 Cell **map = NULL;
 CacheData *cache = NULL;
-bool **visited = NULL;
 int **distances = NULL;
-
 const CubeCoords neighbors_dir[MAX_NEIGHBORS] = {
     {1, -1, 0}, {1, 0, -1}, {0, 1, -1},
     {-1, 1, 0}, {-1, 0, 1}, {0, -1, 1}
 };
+
+
 
 // Funzioni ausiliarie
 inline bool is_cell_valid(int x, int y) {
@@ -82,7 +83,7 @@ inline CubeCoords cube_sub(CubeCoords a, CubeCoords b) {
 inline int cube_len(CubeCoords h) {
     assert(h.q + h.r + h.s == 0);
 
-    return ceil(((abs(h.q) + abs(h.r) + abs(h.s)) / 2.0));
+    return ((abs(h.q) + abs(h.r) + abs(h.s)) / 2.0);
 }
 
 inline int cube_distance(CubeCoords end, CubeCoords start) {
@@ -108,59 +109,28 @@ inline bool pq_is_empty(PriorityQueue *pq) {
     return pq->size == 0;
 }
 
-inline unsigned int hash_function(int x1, int y1, int x2, int y2) {
-    unsigned int hash = 17;
-    hash = hash * 31 + (unsigned int)x1;
-    hash = hash * 31 + (unsigned int)y1;
-    hash = hash * 31 + (unsigned int)x2;
-    hash = hash * 31 + (unsigned int)y2;
+PriorityQueue *pq_init(int max_capacity) {
+    PriorityQueue *pq = malloc(sizeof(PriorityQueue));
+    pq->nodes = malloc(max_capacity * sizeof(PQNode));
+    pq->size = 0;
+    pq->max_capacity = max_capacity;
 
-    return hash % CACHE_SIZE;
+    return pq;
 }
 
-inline void invalidate_cache() {
-    if(cache == NULL){
-        return;
+inline void pq_free(PriorityQueue *pq) {
+    if(pq != NULL) {
+        free(pq->nodes);
+        free(pq);
     }
-
-    for(int i = 0; i < CACHE_SIZE; i++) {
-        cache[i].valid = false;
-    }
-}
-
-inline int cache_search(int x1, int y1, int x2, int y2) {
-    if(cache == NULL){
-        return CACHE_MISS;
-    }
-
-    unsigned int key = hash_function(x1, y1, x2, y2);
-    CacheData *entry = &cache[key];
-
-    if(entry->valid == true && entry->xp == x1 && entry->yp == y1 && entry->xd == x2 && entry->yd == y2) {
-        return entry->cost;
-    }
-
-    return CACHE_MISS;
-}
-
-inline void cache_insert(int x1, int y1, int x2, int y2, int cost) {
-    assert(cache != NULL);
-
-    unsigned int key = hash_function(x1, y1, x2, y2);
-    CacheData *entry = &cache[key];
-
-    entry->xp = x1;
-    entry->yp = y1;
-    entry->xd = x2;
-    entry->yd = y2;
-    entry->cost = cost;
-    entry->valid = true;
 }
 
 inline void heapify_up(PriorityQueue *pq, int idx) {
     while(idx > 0){
         int parent = (idx - 1) / 2;
-        if(pq->nodes[idx].cost >= pq->nodes[parent].cost) break;
+        if(pq->nodes[idx].cost >= pq->nodes[parent].cost){
+            break;
+        }
 
         PQNode temp = pq->nodes[idx];
         pq->nodes[idx] = pq->nodes[parent];
@@ -213,20 +183,14 @@ inline PQNode pq_dequeue(PriorityQueue *pq) {
     return minimum;
 }
 
-PriorityQueue *pq_init(int max_capacity) {
-    PriorityQueue *pq = malloc(sizeof(PriorityQueue));
-    pq->nodes = malloc(max_capacity * sizeof(PQNode));
-    pq->size = 0;
-    pq->max_capacity = max_capacity;
+inline unsigned int paths_hash_function(int x1, int y1, int x2, int y2) {
+    unsigned int hash = 17;
+    hash = hash * 31 + (unsigned int)x1;
+    hash = hash * 31 + (unsigned int)y1;
+    hash = hash * 31 + (unsigned int)x2;
+    hash = hash * 31 + (unsigned int)y2;
 
-    return pq;
-}
-
-void pq_free(PriorityQueue *pq) {
-    if(pq != NULL) {
-        free(pq->nodes);
-        free(pq);
-    }
+    return hash % CACHE_SIZE;
 }
 
 CacheData *cache_init() {
@@ -239,7 +203,46 @@ CacheData *cache_init() {
     return cache;
 }
 
-OffsetCoords find_ground_neighbor(int dir, CubeCoords hex) {
+inline void invalidate_cache() {
+    if(cache == NULL){
+        return;
+    }
+
+    for(int i = 0; i < CACHE_SIZE; i++) {
+        cache[i].valid = false;
+    }
+}
+
+inline int cache_search(int x1, int y1, int x2, int y2) {
+    if(cache == NULL){
+        return CACHE_MISS;
+    }
+
+    unsigned int key = paths_hash_function(x1, y1, x2, y2);
+    CacheData *entry = &cache[key];
+
+    if(entry->valid == true && entry->xp == x1 && entry->yp == y1 && entry->xd == x2 && entry->yd == y2) {
+        return entry->cost;
+    }
+
+    return CACHE_MISS;
+}
+
+inline void cache_insert(int x1, int y1, int x2, int y2, int cost) {
+    assert(cache != NULL);
+
+    unsigned int key = paths_hash_function(x1, y1, x2, y2);
+    CacheData *entry = &cache[key];
+
+    entry->xp = x1;
+    entry->yp = y1;
+    entry->xd = x2;
+    entry->yd = y2;
+    entry->cost = cost;
+    entry->valid = true;
+}
+
+inline OffsetCoords find_ground_neighbor(int dir, CubeCoords hex) {
     CubeCoords delta = neighbors_dir[dir];
     CubeCoords ground_neighbor_coords_cube = cube_add(hex, delta);
     OffsetCoords ground_neighbor_coords_offset = offset_from_cube(OFFSET_ODD, ground_neighbor_coords_cube);
@@ -304,14 +307,6 @@ void clean_all() {
         free(map);
         map = NULL;
     }
-    
-    if(visited != NULL) {
-        for(int x = 0; x < width; x++){
-            free(visited[x]);
-        }
-        free(visited);
-        visited = NULL;
-    }
 
     if(distances != NULL) {
         for(int x = 0; x < width; x++){
@@ -346,12 +341,11 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
 
     for(int x = 0; x < width; x++){
         for(int y = 0; y < height; y++){
-            visited[x][y] = false;
             distances[x][y] = INT32_MAX;
         }
     }
 
-    PQNode start_node = {start, 0};
+    PQNode start_node = {start, 0, false};
     pq_enqueue(frontier, start_node);
     distances[start.x][start.y] = 0;
 
@@ -363,11 +357,11 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
         int current_cost = current.cost;
 
         // Controllo se ho già visitato la cella quando il costo era migliore
-        if(visited[current_position.x][current_position.y] == true){
+        if(current.visited == true){
             continue;
         }
         // Se no, la visito
-        visited[current_position.x][current_position.y] = true;
+        current.visited = true;
         // Controllo se ho raggiunto la destinazione
         if(current_position.x == end.x && current_position.y == end.y){
             result = current_cost;
@@ -385,8 +379,9 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
 
         for(int i = 0; i < neighbor_count; i++){
             OffsetCoords neighbor = neighbors[i];
+            PQNode neighbor_node = {neighbor, 0};
 
-            if(visited[neighbor.x][neighbor.y] == true){
+            if(neighbor_node.visited == true){
                 continue;
             }
 
@@ -405,6 +400,8 @@ int dijkstra(OffsetCoords start, OffsetCoords end) {
     return result;
 }
 
+
+
 // Funzioni principali
 void init(int cols, int rows) {
     if(rows <= 0 || cols <= 0) {
@@ -414,6 +411,7 @@ void init(int cols, int rows) {
 
     if(map != NULL){
         clean_all();
+        is_map_fresh = true;
     }
 
     if(cache == NULL){
@@ -429,15 +427,12 @@ void init(int cols, int rows) {
     map = malloc(width * sizeof(Cell *));
 
     map[0] = malloc(width * height * sizeof(Cell));
-
     for(int x = 1; x < width; x++) {
         map[x] = map[0] + x * height;
     }
 
-    visited = malloc(width * sizeof(bool *));
     distances = malloc(width * sizeof(int *));
     for(int x = 0; x < width; x++){
-        visited[x] = malloc(height * sizeof(bool));
         distances[x] = malloc(height * sizeof(int));
     }
 
@@ -467,7 +462,7 @@ void change_cost(int x, int y, int v, int radius) {
         for(int r = center_cube.r - radius; r <= center_cube.r + radius; r++) {
             int s = -q - r;
             CubeCoords current_node_cube = {q, r, s};
-            OffsetCoords current_node_offset = offset_from_cube(OFFSET_ODD, current_node_cube); // Converto in offset per controllarne la validità        
+            OffsetCoords current_node_offset = offset_from_cube(OFFSET_ODD, current_node_cube);     
             if(!is_cell_valid(current_node_offset.x, current_node_offset.y)){
                 continue;
             }
@@ -492,6 +487,7 @@ void change_cost(int x, int y, int v, int radius) {
         }
     }
 
+    is_map_fresh = false;
     printf("OK\n");
 }
 
@@ -536,15 +532,7 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         route->air_route_cost = 0;
         start->air_routes_number--;
 
-        if(cache != NULL){
-            for(int i = 0; i < CACHE_SIZE; i++){
-                if(cache[i].valid == true){
-                    if((cache[i].xp == x1 && cache[i].yp == y1) || (cache[i].xp == x2 && cache[i].yp == y2)){
-                        cache[i].valid = false;
-                    }
-                }
-            }
-        }
+        invalidate_cache();
 
         printf("OK\n");
         return;
@@ -560,7 +548,9 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
 
         invalidate_cache();
 
+        is_map_fresh = false;
         printf("OK\n");
+
         return;
     }
     else{
@@ -579,6 +569,12 @@ int travel_cost(int xp, int yp, int xd, int yd) {
         return INVALID_COST;
     }
 
+    if(is_map_fresh == true){
+        CubeCoords start_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){xp, yp});
+        CubeCoords end_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){xd, yd});
+        return cube_distance(end_cube, start_cube);
+    }
+
     if(cache != NULL){
         int cached_cost = cache_search(xp, yp, xd, yd);
         if(cached_cost != CACHE_MISS){
@@ -594,6 +590,8 @@ int travel_cost(int xp, int yp, int xd, int yd) {
 
     return cost;
 }
+
+
 
 // Funzione MAIN
 int main(int argc, char *argv[]) {
