@@ -54,12 +54,19 @@ typedef struct{
     bool valid;
 } CacheData;
 
+
+
 // Variabili e costanti globali
 int width, height;
-bool map_fresh = true;
+
+bool fresh_map = true;
+
 Cell **map = NULL;
+
 CacheData *cache = NULL;
+
 int **distances = NULL;
+
 const CubeCoords neighbors_dir[MAX_NEIGHBORS] = {
     {1, -1, 0}, {1, 0, -1}, {0, 1, -1},
     {-1, 1, 0}, {-1, 0, 1}, {0, -1, 1}
@@ -69,7 +76,7 @@ const CubeCoords neighbors_dir[MAX_NEIGHBORS] = {
 
 // Funzioni ausiliarie
 inline bool is_cell_valid(int x, int y) {
-    return (map != NULL && x >= 0 && x < width && y >= 0 && y < height);
+    return (x >= 0 && x < width && y >= 0 && y < height);
 }
 
 inline CubeCoords cube_add(CubeCoords a, CubeCoords b) {
@@ -81,8 +88,6 @@ inline CubeCoords cube_sub(CubeCoords a, CubeCoords b) {
 }
 
 inline int cube_len(CubeCoords h) {
-    assert(h.q + h.r + h.s == 0);
-
     return ((abs(h.q) + abs(h.r) + abs(h.s)) / 2.0);
 }
 
@@ -141,26 +146,26 @@ inline void heapify_up(PriorityQueue *pq, int idx) {
 }
 
 inline void heapify_down(PriorityQueue *pq, int idx) {
-    int left, right, smallest;
+    int left, right, minimum;
     while(true){
         left = 2 * idx + 1;
         right = 2 * idx + 2;
-        smallest = idx;
+        minimum = idx;
 
-        if(left < pq->size && pq->nodes[left].cost < pq->nodes[smallest].cost){
-            smallest = left;
+        if(left < pq->size && pq->nodes[left].cost < pq->nodes[minimum].cost){
+            minimum = left;
         }
-        if(right < pq->size && pq->nodes[right].cost < pq->nodes[smallest].cost){
-            smallest = right;
+        if(right < pq->size && pq->nodes[right].cost < pq->nodes[minimum].cost){
+            minimum = right;
         }
-        if(smallest == idx){
+        if(minimum == idx){
             break;
         }
 
         PQNode temp = pq->nodes[idx];
-        pq->nodes[idx] = pq->nodes[smallest];
-        pq->nodes[smallest] = temp;
-        idx = smallest;
+        pq->nodes[idx] = pq->nodes[minimum];
+        pq->nodes[minimum] = temp;
+        idx = minimum;
     }
 }
 
@@ -173,8 +178,6 @@ inline void pq_enqueue(PriorityQueue *pq, PQNode node) {
 }
 
 inline PQNode pq_dequeue(PriorityQueue *pq) {
-    assert(pq->size > 0);
-    
     PQNode minimum = pq->nodes[0];
     pq->nodes[0] = pq->nodes[pq->size - 1];
     pq->size--;
@@ -229,8 +232,6 @@ inline int cache_search(int x1, int y1, int x2, int y2) {
 }
 
 inline void cache_insert(int x1, int y1, int x2, int y2, int cost) {
-    assert(cache != NULL);
-
     unsigned int key = hash_function(x1, y1, x2, y2);
     CacheData *entry = &cache[key];
 
@@ -308,6 +309,7 @@ void clean_all() {
         map = NULL;
     }
 
+    // Free matrice distanze per dijkstra
     if(distances != NULL) {
         for(int x = 0; x < width; x++){
             free(distances[x]);
@@ -411,7 +413,7 @@ void init(int cols, int rows) {
 
     if(map != NULL){
         clean_all();
-        map_fresh = true;
+        fresh_map = true;
     }
 
     if(cache == NULL){
@@ -456,7 +458,7 @@ void change_cost(int x, int y, int v, int radius) {
 
     invalidate_cache();
 
-    CubeCoords center_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){x, y}); // Trovo le coordinate cubiche del centro
+    CubeCoords center_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){x, y});
 
     for(int q = center_cube.q - radius; q <= center_cube.q + radius; q++) {
         for(int r = center_cube.r - radius; r <= center_cube.r + radius; r++) {
@@ -487,9 +489,7 @@ void change_cost(int x, int y, int v, int radius) {
         }
     }
 
-    if(map_fresh == true){
-        map_fresh = false;
-    }
+    fresh_map = false;
 
     printf("OK\n");
 }
@@ -500,9 +500,7 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         return;
     }
 
-    if(map_fresh == true){
-        map_fresh = false;
-    }
+    fresh_map = false;
 
     Cell *start = &map[x1][y1];
 
@@ -513,7 +511,7 @@ void toggle_air_routes(int x1, int y1, int x2, int y2) {
         for(int i = 0; i < MAX_AIR_ROUTES; i++){
             start->air_routes_arr[i].to_x = INVALID_COORDS;
             start->air_routes_arr[i].to_y = INVALID_COORDS;
-            start->air_routes_arr[i].air_route_cost = 0; // Costo 0 = rotta non attiva
+            start->air_routes_arr[i].air_route_cost = 0;
         }
     }
 
@@ -574,7 +572,7 @@ int travel_cost(int xp, int yp, int xd, int yd) {
         return INVALID_COST;
     }
 
-    if(map_fresh == true){
+    if(fresh_map == true){
         CubeCoords start_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){xp, yp});
         CubeCoords end_cube = cube_from_offset(OFFSET_ODD, (OffsetCoords){xd, yd});
 
@@ -604,9 +602,6 @@ int main(int argc, char *argv[]) {
     char *buffer;
     size_t bufsize = 100;
     size_t length;
-
-    // time_t start_time;
-    // start_time = time(NULL);
 
     buffer = malloc(bufsize * sizeof(char));
     if(buffer == NULL){
@@ -689,18 +684,6 @@ int main(int argc, char *argv[]) {
             printf("No command %s\n", buffer);
         }
     }
-
-    free(buffer);
-
-    if(cache != NULL){
-        free(cache);
-        cache = NULL;
-    }
-
-    clean_all();
-
-    // time_t end_time = time(NULL);
-    // printf("Execution time: %ld seconds\n", end_time - start_time);
 
     return 0;
 }
