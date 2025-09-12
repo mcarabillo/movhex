@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+.vscode/
+test_pubblici/
+movhex
+project.c.old
+specifica_movhex_llm.md
