@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <math.h>
-#include <time.h>
 
 #define MAX_AIR_ROUTES 5 // Maximum number of air routes per cell
 #define MAX_NEIGHBORS 6 // Maximum number of ground neighbors per cell
