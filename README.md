@@ -21,7 +21,7 @@ To build the project:
 make movhex
 ```
 
-This will produce the `movhex` executable (or `a.out` depending on implicit make rules, though usually explicit targets are preferred. Based on the source, you can compile manually if needed):
+This will produce the `movhex` executable:
 
 ```bash
 gcc -Wall -Werror -std=gnu11 -g3 -O2 -fsanitize=address movhex.c -lm -o movhex
