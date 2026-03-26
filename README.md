@@ -1,4 +1,4 @@
-# Movhex: Hexagonal Grid Pathfinding
+# Movhex: Hexagonal Grid Pathfinding - Politecnico di Milano, a.a. 2024/2025
 
 **Movhex** is a C-based pathfinding engine designed for hexagonal grids. It implements efficient path calculation using Dijkstra's algorithm, supporting dynamic terrain costs and special "air route" connections between non-adjacent cells.
 
